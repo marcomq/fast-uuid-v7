@@ -1,0 +1,15 @@
+[package]
+name = "fast-uuid-v7"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.9"
+
+[[bench]]
+name = "benchmark"
+harness = false
+
+[dev-dependencies]
+criterion = "0.8"
+uuid = { version = "1", features = ["v7"] }
