@@ -3,6 +3,7 @@ name = "fast-uuid-v7"
 version = "0.1.0"
 edition = "2021"
 description = "A high-performance Rust library for generating UUID v7 compatible identifiers."
+repository = "https://github.com/marcomq/fast-uuid-v7"
 license = "MIT"
 
 [dependencies]
