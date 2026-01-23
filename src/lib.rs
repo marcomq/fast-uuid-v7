@@ -22,12 +22,13 @@ thread_local! {
 /// - 48 bits: Current timestamp in milliseconds.
 /// -  4 bits: Version (7).
 /// - 12 bits: Counter (High 12 bits of 18).
-/// -  2 bits: Variant (2).
+/// -  2 bits: Variant (10..).
 /// -  6 bits: Counter (Low 6 bits of 18).
 /// - 56 bits: Random number.
 ///
 /// This layout effectively provides an 18-bit counter (supporting ~262k IDs/ms)
-/// by utilizing the standard `rand_a` field and the upper bits of `rand_b`.
+/// by utilizing the standard `rand_a` field and the upper bits of `rand_b`
+/// (compliant with RFC 9562 Method 1).
 ///
 /// **Note on Sorting:**
 /// Since the counter is thread-local and resets every millisecond, IDs generated
@@ -115,12 +116,18 @@ pub fn gen_id_u128() -> u128 {
     let timestamp_part = (timestamp as u128) << 80;
     let version_part = 7u128 << 76; // Version 7 (0111)
     let counter_part = (rand_a as u128) << 64; // 12 bits of counter
-    let variant_part = 2u128 << 62; // Variant 1 (10..)
+    let variant_part = 2u128 << 62; // Variant 1 (10..), RFC 4122
                                     // 56 bits of randomness + 6 bits of counter
     let rand_b_low = rand_nr & 0x00FF_FFFF_FFFF_FFFF;
     let random_part = ((rand_b_high as u128) << 56) | (rand_b_low as u128);
 
     timestamp_part | version_part | counter_part | variant_part | random_part
+}
+
+/// Alias for `gen_id_u128`.
+#[inline]
+pub fn gen_id() -> u128 {
+    gen_id_u128()
 }
 
 /// Generates a UUID v7 string using the `gen_id_u128` function.
@@ -141,7 +148,7 @@ pub fn gen_id_string() -> String {
 ///
 /// This type implements `Deref<Target=str>`, so it can be used like a `&str`.
 /// It avoids heap allocation, making it faster than `gen_id_string`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UuidString([u8; 36]);
 
 impl std::ops::Deref for UuidString {
@@ -149,6 +156,24 @@ impl std::ops::Deref for UuidString {
     fn deref(&self) -> &str {
         // SAFETY: The buffer is always filled with valid ASCII (hex + dashes)
         unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+}
+
+impl AsRef<str> for UuidString {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
+impl PartialEq<str> for UuidString {
+    fn eq(&self, other: &str) -> bool {
+        &**self == other
+    }
+}
+
+impl PartialEq<&str> for UuidString {
+    fn eq(&self, other: &&str) -> bool {
+        &**self == *other
     }
 }
 
