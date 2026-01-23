@@ -1,6 +1,6 @@
 [package]
 name = "fast-uuid-v7"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A high-performance Rust library for generating UUID v7 compatible identifiers."
 license = "MIT"
