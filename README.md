@@ -53,7 +53,7 @@ fn main() {
     let id_string = gen_id_string();
     println!("Generated ID string: {}", id_string);
 
-    // Get ID as stack-allocated string (zero allocation, implements Deref<Target=str>, takes about 20-60ns)
+    // Get ID as stack-allocated string (zero allocation, implements Deref<Target=str>, takes about 23-60ns)
     let stack_str = gen_id_str();
     println!("Generated ID stack string: {}", stack_str);
 }
@@ -63,9 +63,9 @@ fn main() {
 
 On a modern machine (e.g., Apple M1 or recent x86_64), you can expect:
 
-*   **`gen_id_u128`**: ~11 ns
-*   **`gen_id_str`**: ~23 ns (zero-allocation)
-*   **`gen_id_string`**: ~90 ns (includes heap allocation)
+*   **`gen_id`**: ~11-50 ns
+*   **`gen_id_str`**: ~23-60 ns (zero-allocation)
+*   **`gen_id_string`**: ~90-130 ns (includes heap allocation)
 
 Generating 10 million IDs takes approximately **120ms** on a single core.
 
