@@ -18,5 +18,16 @@ fn benchmark_uuid_now_v7(c: &mut Criterion) {
     c.bench_function("uuid_now_v7", |b| b.iter(|| Uuid::now_v7()));
 }
 
-criterion_group!(benches, benchmark_gen_id_u128, benchmark_gen_id_string, benchmark_gen_id_str, benchmark_uuid_now_v7);
+fn benchmark_uuid_now_v7_str(c: &mut Criterion) {
+    c.bench_function("uuid_now_v7_str", |b| b.iter(|| Uuid::now_v7().to_string()));
+}
+
+criterion_group!(
+    benches,
+    benchmark_gen_id_u128,
+    benchmark_gen_id_string,
+    benchmark_gen_id_str,
+    benchmark_uuid_now_v7,
+    benchmark_uuid_now_v7_str
+);
 criterion_main!(benches);

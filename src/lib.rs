@@ -21,20 +21,27 @@ thread_local! {
 /// The identifier is a `u128` value composed of:
 /// - 48 bits: Current timestamp in milliseconds.
 /// -  4 bits: Version (7).
-/// - 12 bits: Counter (High 12 bits of 18).
+/// - 12 bits: Random data (or Counter High 12 bits if `use_counter` enabled).
 /// -  2 bits: Variant (10..).
-/// -  6 bits: Counter (Low 6 bits of 18).
-/// - 56 bits: Random number.
+/// - 62 bits: Random data (or Counter Low 6 bits + 56 bits random if `use_counter` enabled).
 ///
-/// This layout effectively provides an 18-bit counter (supporting ~262k IDs/ms)
-/// by utilizing the standard `rand_a` field and the upper bits of `rand_b`
-/// (compliant with RFC 9562 Method 1).
+/// **Default Behavior (74 bits randomness):**
+/// By default, this function uses 74 bits of randomness. This provides extremely low
+/// collision probability across distributed systems but does not guarantee monotonicity
+/// for IDs generated within the same millisecond on the same thread.
 ///
-/// **Note on Sorting:**
-/// Since the counter is thread-local and resets every millisecond, IDs generated
-/// concurrently by multiple threads within the same millisecond are not guaranteed
-/// to be globally monotonic.
-/// This is not random enough for cryptography!
+/// **With `use_counter` feature:**
+/// If the `use_counter` feature is enabled, it uses an 18-bit counter (supporting ~262k IDs/ms)
+/// combined with 56 bits of randomness. This guarantees per-thread monotonicity but
+/// increases collision risk across different nodes if the random part is exhausted.
+///
+/// **Randomness Comparison:**
+/// - Default: 74 bits (Same as standard `uuid` v7).
+/// - With `use_counter`: 56 bits.
+/// - Note: This library uses a seeded `SmallRng` (fast) vs `uuid`'s CSPRNG (secure).
+///
+/// fast-uuid-v7 is is not random enough for cryptography!
+#[inline]
 pub fn gen_id_u128() -> u128 {
     // Optimization: Check time only every 32 calls to amortize syscall overhead.
     const TIME_CHECK_MASK: u32 = 0x1F;
@@ -71,7 +78,13 @@ pub fn gen_id_u128() -> u128 {
                     LAST_TSC.with(|t| t.set(current_tsc));
                     (c & TIME_CHECK_MASK) == 0 || current_tsc.wrapping_sub(last_tsc) > TSC_THRESHOLD
                 }
-                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // WASM lacks a cheap cycle counter (like rdtsc) to detect thread sleeps.
+                    // We must check the time on every call to prevent timestamp drift.
+                    true
+                }
+                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
                 {
                     true
                 }
@@ -106,22 +119,45 @@ pub fn gen_id_u128() -> u128 {
         })
     });
 
-    // Use 18 bits for counter: 12 in rand_a, 6 in rand_b high.
-    // This allows ~262k IDs per millisecond per thread.
-    let rand_a = (counter >> 6) & 0xFFF;
-    let rand_b_high = counter & 0x3F;
-
-    let rand_nr = RNG.with(|random_nr| random_nr.borrow_mut().next_u64());
-
     let timestamp_part = (timestamp as u128) << 80;
     let version_part = 7u128 << 76; // Version 7 (0111)
-    let counter_part = (rand_a as u128) << 64; // 12 bits of counter
     let variant_part = 2u128 << 62; // Variant 1 (10..), RFC 4122
-                                    // 56 bits of randomness + 6 bits of counter
-    let rand_b_low = rand_nr & 0x00FF_FFFF_FFFF_FFFF;
-    let random_part = ((rand_b_high as u128) << 56) | (rand_b_low as u128);
 
-    timestamp_part | version_part | counter_part | variant_part | random_part
+    #[cfg(feature = "use_counter")]
+    {
+        // Use 18 bits for counter: 12 in rand_a, 6 in rand_b high.
+        // This allows ~262k IDs per millisecond per thread.
+        let rand_a = (counter >> 6) & 0xFFF;
+        let rand_b_high = counter & 0x3F;
+
+        let rand_nr = RNG.with(|random_nr| random_nr.borrow_mut().next_u64());
+
+        let counter_part = (rand_a as u128) << 64; // 12 bits of counter
+                                                   // 56 bits of randomness + 6 bits of counter
+        let rand_b_low = rand_nr & 0x00FF_FFFF_FFFF_FFFF;
+        let random_part = ((rand_b_high as u128) << 56) | (rand_b_low as u128);
+
+        timestamp_part | version_part | counter_part | variant_part | random_part
+    }
+
+    #[cfg(not(feature = "use_counter"))]
+    {
+        // Suppress unused variable warning for counter
+        let _ = counter;
+
+        // We need 74 bits of randomness. SmallRng generates 64 bits per call.
+        let (r1, r2) = RNG.with(|random_nr| {
+            let mut rng = random_nr.borrow_mut();
+            (rng.next_u64(), rng.next_u64())
+        });
+
+        // rand_a: 12 bits (from r1)
+        let rand_a = (r1 & 0xFFF) as u128;
+        // rand_b: 62 bits (from r2)
+        let rand_b = (r2 & 0x3FFFFFFFFFFFFFFF) as u128;
+
+        timestamp_part | version_part | (rand_a << 64) | variant_part | rand_b
+    }
 }
 
 /// Alias for `gen_id_u128`.
@@ -144,48 +180,14 @@ pub fn gen_id_string() -> String {
     gen_id_str().to_string()
 }
 
-/// A stack-allocated string representation of a UUID (36 bytes).
-///
-/// This type implements `Deref<Target=str>`, so it can be used like a `&str`.
-/// It avoids heap allocation, making it faster than `gen_id_string`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UuidString([u8; 36]);
-
-impl std::ops::Deref for UuidString {
-    type Target = str;
-    fn deref(&self) -> &str {
-        // SAFETY: The buffer is always filled with valid ASCII (hex + dashes)
-        unsafe { std::str::from_utf8_unchecked(&self.0) }
-    }
-}
-
-impl AsRef<str> for UuidString {
-    fn as_ref(&self) -> &str {
-        self
-    }
-}
-
-impl PartialEq<str> for UuidString {
-    fn eq(&self, other: &str) -> bool {
-        &**self == other
-    }
-}
-
-impl PartialEq<&str> for UuidString {
-    fn eq(&self, other: &&str) -> bool {
-        &**self == *other
-    }
-}
-
-impl std::fmt::Display for UuidString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self)
-    }
-}
-
 /// Generates a UUID v7 string on the stack, avoiding heap allocation.
 pub fn gen_id_str() -> UuidString {
-    let id = gen_id_u128();
+    format_uuid(gen_id_u128())
+}
+
+/// Formats a u128 UUID into a stack-allocated string representation.
+/// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+pub fn format_uuid(id: u128) -> UuidString {
     let mut out = UuidString([0; 36]);
     let bytes = id.to_be_bytes();
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -242,9 +244,49 @@ pub fn gen_id_str() -> UuidString {
     out
 }
 
+/// A stack-allocated string representation of a UUID (36 bytes).
+///
+/// This type implements `Deref<Target=str>`, so it can be used like a `&str`.
+/// It avoids heap allocation, making it faster than `gen_id_string`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UuidString([u8; 36]);
+
+impl std::ops::Deref for UuidString {
+    type Target = str;
+    fn deref(&self) -> &str {
+        // SAFETY: The buffer is always filled with valid ASCII (hex + dashes)
+        unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+}
+
+impl AsRef<str> for UuidString {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
+impl PartialEq<str> for UuidString {
+    fn eq(&self, other: &str) -> bool {
+        &**self == other
+    }
+}
+
+impl PartialEq<&str> for UuidString {
+    fn eq(&self, other: &&str) -> bool {
+        &**self == *other
+    }
+}
+
+impl std::fmt::Display for UuidString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self)
+    }
+}
+
 /// Returns the current time in milliseconds since the Unix epoch.
 ///
 /// It returns `0` if the system clock hasn't started yet.
+#[inline]
 fn fast_time_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -276,6 +318,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "use_counter")]
     /// IDs are sorted correctly per thread.
     /// Capacity is ~262k IDs per ms (18 bits).
     fn test_next_id_ordering() {
