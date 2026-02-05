@@ -1,6 +1,6 @@
 [package]
 name = "fast-uuid-v7"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "A high-performance Rust library for generating UUID v7 compatible identifiers."
 repository = "https://github.com/marcomq/fast-uuid-v7"
@@ -8,11 +8,6 @@ license = "MIT"
 
 [dependencies]
 rand = "0.9"
-
-[features]
-# Enables the 18-bit monotonic counter (reduces randomness to 56 bits).
-# If disabled (default), uses 74 bits of randomness.
-use_counter = []
 
 [[bench]]
 name = "benchmark"

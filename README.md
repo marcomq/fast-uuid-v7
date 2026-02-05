@@ -8,7 +8,7 @@ This implementation focuses on speed. It uses thread-local storage and a seeded 
 
 *   **UUID v7**: Time-ordered, 128-bit unique identifiers.
 *   **Fast**: Minimal overhead using thread-local state.
-*   **Configurable**: Choose between maximum randomness (default) or per-thread monotonicity.
+*   **Flexible**: Choose between maximum randomness (`gen_id`) or per-thread monotonicity (`gen_id_with_count`).
 
 ## Why?
 
@@ -19,7 +19,7 @@ I figured out that 400,000 is mostly the limit of the standard `uuid` crate when
 using v7 without any additional feature flags. This happened due to the strong
 random number generator used in `uuid`. While a strong RNG is correct and avoids potential issues
 in security or crypto contexts, it is otherwise just very slow.
-I found out about the `fast-rng` feature flag of `uuid` after creating this crate. But even with `fast-rng` feature flag, `fast-uuid-ui` is much faster than `uuid`.
+I found out about the `fast-rng` feature flag of `uuid` after creating this crate. But even with `fast-rng` feature flag, `fast-uuid-v7` is much faster than `uuid`.
 
 ## Comparison to `uuid` crate
 
@@ -28,15 +28,15 @@ Compared to the standard `uuid` crate (which may take up to ~1.4µs / 1440ns per
 *   When using feature `fast-rng` on the original `uuid` crate, `fast-uuid-v7` can still be up to 
 8 times faster for `uint128` (11ns vs 90ns) and 6 times faster for `&str` generation (26ns vs 170ns).
 
-## Configuration
+## Randomness vs Monotonicity
 
-### Default (74 bits randomness)
-By default, `fast-uuid-v7` uses all available 74 bits for randomness. This matches the standard UUID v7 randomness layout.
+### `gen_id` (74 bits randomness)
+The default `gen_id` (and `gen_id_u128`) uses all available 74 bits for randomness. This matches the standard UUID v7 randomness layout.
 *   **Pros**: Extremely low collision risk across distributed systems.
 *   **Cons**: IDs generated within the same millisecond on the same thread are not guaranteed to be monotonic (they will be random).
 
-### Feature `use_counter`
-If you enable the `use_counter` feature in `Cargo.toml`, the library uses an 18-bit counter and 56 bits of randomness.
+### `gen_id_with_count` (56 bits randomness + 18-bit counter)
+The `gen_id_with_count` function uses an 18-bit counter and 56 bits of randomness.
 *   **Pros**: Guarantees monotonicity per thread (up to ~262k IDs/ms).
 *   **Cons**: Reduced randomness (56 bits) increases collision risk in massive distributed systems (approx. 50% chance after 4.5 billion IDs/ms globally).
 
@@ -46,23 +46,27 @@ The 128-bit ID is fully compatible with UUID v7. It is composed of:
 
 *   **48 bits**: Unix timestamp in milliseconds.
 *   **4 bits**: Version (7).
-*   **12 bits**: Random Data (or Counter High 12 bits with `use_counter`).
+*   **12 bits**: Random Data (or Counter High 12 bits with `gen_id_with_count`).
 *   **2 bits**: Variant (10xx).
-*   **62 bits**: Random Data (or Counter Low 6 bits + 56 bits random with `use_counter`).
+*   **62 bits**: Random Data (or Counter Low 6 bits + 56 bits random with `gen_id_with_count`).
 
 **Total Randomness:**
-*   Default: **74 bits**
-*   With `use_counter`: **56 bits**
+*   `gen_id`: **74 bits**
+*   `gen_id_with_count`: **56 bits**
 
 ## Usage
 
 ```rust
-use fast_uuid_v7::{gen_id, gen_id_string, gen_id_str};
+use fast_uuid_v7::{gen_id, gen_id_string, gen_id_str, gen_id_with_count};
 
 fn main() {
-    // Get ID as u128, takes about 11-50ns
+    // Get ID as u128 (74 bits random), takes about 11-50ns
     let id = gen_id();
     println!("Generated ID: {:032x}", id);
+
+    // Get monotonic ID (56 bits random + 18-bit counter)
+    let ordered_id = gen_id_with_count();
+    println!("Ordered ID: {:032x}", ordered_id);
 
     // Get ID as canonical string (allocates String, takes about 90-130ns)
     let id_string = gen_id_string();
@@ -95,7 +99,7 @@ Generating 10 million IDs takes approximately **120ms** on a single core.
 ### Limitations
 
 *   **Not Cryptographically Secure**: The randomness is optimized for speed, not unpredictability. Do not use for session tokens or secrets. If you don't need speed, use the original `uuid` crate.
-*   **Monotonicity**: Only guaranteed per-thread if `use_counter` is enabled. Otherwise, IDs within the same millisecond are random.
+*   **Monotonicity**: Only guaranteed per-thread if using `gen_id_with_count`. Otherwise, IDs within the same millisecond are random.
 *   **Clock Drift Risk**: The batched timestamp check assumes the CPU counter frequency is stable. While we include safety checks, extreme edge cases (e.g., VM migration) might cause a 1ms timestamp lag.
 *   **Still needs SystemTime::now()**: The speed of 11ns is not constant and can only be achieved if we can skip calling `SystemTime::now()`. We still need to call `SystemTime::now()` from time to time, for example if the previous call was 1ms ago. In that case, we still need to call `SystemTime::now()` and the performance drops to about 50ns. This is still much faster than the original `uuid` crate.
 
