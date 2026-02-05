@@ -23,10 +23,10 @@ I found out about the `fast-rng` feature flag of `uuid` after creating this crat
 
 ## Comparison to `uuid` crate
 
-Compared to the standard `uuid` crate (which may take up to ~1.4µs / 1440ns per ID):
-*   **`fast-uuid-v7` can be up to ~130x faster** (11ns vs 1440ns).
+Compared to the standard `uuid` crate (which may take up to ~1.4µs / 1400ns per ID):
+*   **`fast-uuid-v7` can be up to ~165x faster** (8.4ns vs 1400ns).
 *   When using feature `fast-rng` on the original `uuid` crate, `fast-uuid-v7` can still be up to 
-8 times faster for `uint128` (11ns vs 90ns) and 6 times faster for `&str` generation (26ns vs 170ns).
+10 times faster for `uint128` (8.4ns vs 90ns) and 8 times faster for `&str` generation (21.5ns vs 170ns).
 
 ## Randomness vs Monotonicity
 
@@ -60,7 +60,7 @@ The 128-bit ID is fully compatible with UUID v7. It is composed of:
 use fast_uuid_v7::{gen_id, gen_id_string, gen_id_str, gen_id_with_count};
 
 fn main() {
-    // Get ID as u128 (74 bits random), takes about 11-50ns
+    // Get ID as u128 (74 bits random), takes about 8-50ns
     let id = gen_id();
     println!("Generated ID: {:032x}", id);
 
@@ -68,11 +68,11 @@ fn main() {
     let ordered_id = gen_id_with_count();
     println!("Ordered ID: {:032x}", ordered_id);
 
-    // Get ID as canonical string (allocates String, takes about 90-130ns)
+    // Get ID as canonical string (allocates String, takes about 85-130ns)
     let id_string = gen_id_string();
     println!("Generated ID string: {}", id_string);
 
-    // Get ID as stack-allocated string (zero allocation, implements Deref<Target=str>, takes about 23-60ns)
+    // Get ID as stack-allocated string (zero allocation, implements Deref<Target=str>, takes about 21-60ns)
     let stack_str = gen_id_str();
     println!("Generated ID stack string: {}", stack_str);
 }
@@ -82,11 +82,11 @@ fn main() {
 
 On a modern machine (e.g., Apple M1 or recent x86_64), you can expect:
 
-*   **`gen_id`**: ~10-50 ns
-*   **`gen_id_str`**: ~25-60 ns (zero-allocation)
-*   **`gen_id_string`**: ~90-130 ns (includes heap allocation)
+*   **`gen_id`**: ~8-50 ns
+*   **`gen_id_str`**: ~21-60 ns (zero-allocation)
+*   **`gen_id_string`**: ~85-130 ns (includes heap allocation)
 
-Generating 10 million IDs takes approximately **120ms** on a single core.
+Generating 10 million IDs takes approximately **95ms** on a single core.
 
 ### How is it so fast?
 
@@ -101,7 +101,7 @@ Generating 10 million IDs takes approximately **120ms** on a single core.
 *   **Not Cryptographically Secure**: The randomness is optimized for speed, not unpredictability. Do not use for session tokens or secrets. If you don't need speed, use the original `uuid` crate.
 *   **Monotonicity**: Only guaranteed per-thread if using `gen_id_with_count`. Otherwise, IDs within the same millisecond are random.
 *   **Clock Drift Risk**: The batched timestamp check assumes the CPU counter frequency is stable. While we include safety checks, extreme edge cases (e.g., VM migration) might cause a 1ms timestamp lag.
-*   **Still needs SystemTime::now()**: The speed of 11ns is not constant and can only be achieved if we can skip calling `SystemTime::now()`. We still need to call `SystemTime::now()` from time to time, for example if the previous call was 1ms ago. In that case, we still need to call `SystemTime::now()` and the performance drops to about 50ns. This is still much faster than the original `uuid` crate.
+*   **Still needs SystemTime::now()**: The speed of 8ns is not constant and can only be achieved if we can skip calling `SystemTime::now()`. We still need to call `SystemTime::now()` from time to time, for example if the previous call was 1ms ago. In that case, we still need to call `SystemTime::now()` and the performance drops to about 50ns. This is still much faster than the original `uuid` crate.
 
 ### Benchmarking
 
