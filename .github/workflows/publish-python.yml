@@ -125,6 +125,11 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: List distribution files
         run: ls -lh dist/
 
@@ -132,6 +137,11 @@ jobs:
         run: |
           pip install twine
           twine check dist/*
+
+      - name: Smoke test linux wheel
+        run: |
+          pip install --force-reinstall dist/*cp311*manylinux*x86_64.whl
+          python -c "import fastuuidv7; print(fastuuidv7.__version__); print(fastuuidv7.gen_id_str())"
 
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'

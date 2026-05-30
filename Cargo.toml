@@ -1,10 +1,18 @@
-[package]
-name = "fast-uuid-v7"
+[workspace]
+members = ["python"]
+
+[workspace.package]
 version = "0.1.4"
 edition = "2021"
+license = "MIT"
+
+[package]
+name = "fast-uuid-v7"
+version.workspace = true
+edition.workspace = true
 description = "A high-performance Rust library for generating UUID v7 compatible identifiers."
 repository = "https://github.com/marcomq/fast-uuid-v7"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 rand = "0.9"

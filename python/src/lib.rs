@@ -34,6 +34,7 @@ fn fastuuidv7(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gen_id_str, m)?)?;
     m.add_function(wrap_pyfunction!(gen_id_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(format_uuid, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     m.add("uuid7", m.getattr("gen_id_str")?)?;
     m.add("uuid7_bytes", m.getattr("gen_id_bytes")?)?;

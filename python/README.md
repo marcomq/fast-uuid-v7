@@ -1,6 +1,6 @@
 # fastuuidv7
 
-Python bindings for the Rust [`fast-uuid-v7`](..) generator.
+Python bindings for the Rust [`fast-uuid-v7`](https://github.com/marcomq/fast-uuid-v7) generator.
 
 This package is intentionally small. It exposes the fast Rust UUIDv7 generator to Python with a module name of `fastuuidv7` and keeps the API close to the Rust crate.
 

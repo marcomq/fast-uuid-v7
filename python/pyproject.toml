@@ -4,17 +4,32 @@ build-backend = "maturin"
 
 [project]
 name = "fastuuidv7"
-version = "0.1.4"
+# Version is read from Cargo.toml by maturin
+dynamic = ["version"]
 description = "Python bindings for fast-uuid-v7."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
+keywords = ["uuid", "uuid7", "rust", "pyo3", "identifier"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Rust",
+  "Topic :: Software Development :: Libraries",
 ]
+
+[project.urls]
+Homepage = "https://github.com/marcomq/fast-uuid-v7"
+Repository = "https://github.com/marcomq/fast-uuid-v7"
+Issues = "https://github.com/marcomq/fast-uuid-v7/issues"
 
 [tool.maturin]
 bindings = "pyo3"

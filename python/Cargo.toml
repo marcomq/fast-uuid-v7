@@ -1,9 +1,9 @@
 [package]
 name = "fastuuidv7"
-version = "0.1.4"
+version.workspace = true
 edition = "2024"
 description = "Python bindings for fast-uuid-v7."
-license = "MIT"
+license.workspace = true
 
 [lib]
 name = "fastuuidv7"
@@ -15,16 +15,3 @@ pyo3 = { version = "0.28.3", features = ["extension-module"] }
 
 [build-dependencies]
 pyo3-build-config = "0.28.3"
-
-# Performance optimizations for release builds
-[profile.release]
-# Enable Link-Time Optimization for maximum performance
-lto = true
-# Use a single codegen unit for better optimization (slower compile, faster runtime)
-codegen-units = 1
-# Strip symbols to reduce binary size
-strip = true
-# Optimize for speed
-opt-level = 3
-# Enable panic = abort for smaller binaries (Python will handle panics)
-panic = "abort"

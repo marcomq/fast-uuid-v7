@@ -25,3 +25,7 @@ target
 # Added by cargo
 
 /target
+
+# Python bytecode caches
+__pycache__/
+*.pyc
