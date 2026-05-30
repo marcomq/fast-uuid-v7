@@ -43,7 +43,7 @@ Current local results on this machine:
 
 | Package | Callable | Time per call |
 | --- | --- | ---: |
-| `fastuuidv7` | `fastuuidv7.uuid7` | `482.6 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7` | `246.6 ns` |
 | `fastuuid7` | `uuidv7.uuid7` | `275.8 ns` |
 | `uuid` stdlib | `uuid.uuid7` | `1608.9 ns` |
 | `uuid6` | `uuid6.uuid7` | `1977.0 ns` |

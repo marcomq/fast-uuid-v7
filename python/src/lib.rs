@@ -1,6 +1,5 @@
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyModule};
+use pyo3::types::{PyAny, PyBytes, PyString};
 
 #[pyfunction]
 fn gen_id() -> u128 {
@@ -8,8 +7,9 @@ fn gen_id() -> u128 {
 }
 
 #[pyfunction]
-fn gen_id_str() -> String {
-    fast_uuid_v7::gen_id_str().to_string()
+fn gen_id_str(py: Python<'_>) -> Bound<'_, PyString> {
+    let uuid_str = fast_uuid_v7::gen_id_str();
+    PyString::new(py, uuid_str.as_ref())
 }
 
 #[pyfunction]
@@ -19,12 +19,13 @@ fn gen_id_bytes(py: Python<'_>) -> Bound<'_, PyBytes> {
 }
 
 #[pyfunction]
-fn format_uuid(id: &Bound<'_, PyAny>) -> PyResult<String> {
+fn format_uuid<'py>(py: Python<'py>, id: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyString>> {
     let id = id.extract::<u128>().map_err(|_| {
-        PyValueError::new_err("id must be an integer in the range 0 <= id < 2**128")
+        pyo3::exceptions::PyValueError::new_err("id must be an integer in the range 0 <= id < 2**128")
     })?;
 
-    Ok(fast_uuid_v7::format_uuid(id).to_string())
+    let formatted = fast_uuid_v7::format_uuid(id);
+    Ok(PyString::new(py, formatted.as_ref()))
 }
 
 #[pymodule]
