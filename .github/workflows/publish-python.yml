@@ -36,7 +36,7 @@ jobs:
             os: linux
             target: armv7
           # macOS x86_64 (Intel)
-          - runner: macos-13
+          - runner: macos-15-intel
             os: macos
             target: x86_64
           # macOS aarch64 (Apple Silicon)
