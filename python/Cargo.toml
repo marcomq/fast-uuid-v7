@@ -1,0 +1,17 @@
+[package]
+name = "fastuuidv7"
+version = "0.1.3"
+edition = "2021"
+description = "Python bindings for fast-uuid-v7."
+license = "MIT"
+
+[lib]
+name = "fastuuidv7"
+crate-type = ["cdylib"]
+
+[dependencies]
+fast-uuid-v7 = { path = ".." }
+pyo3 = { version = "0.28.3", features = ["extension-module"] }
+
+[build-dependencies]
+pyo3-build-config = "0.28.3"

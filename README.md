@@ -114,6 +114,12 @@ cargo test --release -- test_next_id_performance --nocapture
 cargo bench 
 ```
 
+## Python package
+
+A Python wrapper lives in [python/README.md](python/README.md).
+
+It uses PyO3 and maturin to expose the Rust generator as a `fastuuidv7` module for local speed experiments and for older Python versions. Python 3.14 already includes `uuid.uuid7()` in the standard library.
+
 ## Disclaimer
 
 This generator is designed for database keys and sorting, not for cryptography.
