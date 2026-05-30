@@ -5,7 +5,7 @@ import importlib.metadata
 import timeit
 import uuid
 
-CALLS = 500_000
+CALLS = 5_000_000
 
 
 def optional_module(name):
@@ -59,18 +59,6 @@ def resolve_benchmarks():
     seen = set()
 
     for label, required_distribution, module_candidates in [
-        ("uuid6", "uuid6", [("uuid6", ["uuid7"])]),
-        ("uuid-v7", "uuid-v7", [("uuid_v7", ["uuid7"]), ("uuid_v7.base", ["uuid7"])]),
-        ("uuid7", "uuid7", [("uuid7", ["uuid7"]), ("uuid_extensions", ["uuid7", "uuid7str"])]),
-        ("uuidv7", "uuidv7", [("uuidv7", ["uuid7", "uuidv7", "generate"])]),
-        (
-            "fastuuid7",
-            "fastuuid7",
-            [
-                ("fastuuid7", ["uuid7", "generate", "uuid"]),
-                ("uuidv7", ["uuid7", "uuidv7", "generate"]),
-            ],
-        ),
         ("fastuuidv7", None, [("fastuuidv7", ["uuid7", "gen_id_str"])]),
     ]:
         candidate = resolve_optional_benchmark(
@@ -88,13 +76,6 @@ def resolve_benchmarks():
 
         seen.add(name)
         benchmarks.append((name, fn))
-
-    if hasattr(uuid, "uuid7"):
-        if "uuid.uuid7" not in seen:
-            benchmarks.append(("uuid.uuid7", uuid.uuid7))
-    else:
-        skipped.append("uuid.uuid7")
-
     return benchmarks, skipped
 
 

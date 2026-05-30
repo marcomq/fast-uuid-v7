@@ -1,0 +1,189 @@
+name: Python Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'python/**'
+      - 'src/**'
+      - '.github/workflows/benchmark-python.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'python/**'
+      - 'src/**'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    name: Benchmark on ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # Linux x86_64
+          - name: Linux x86_64
+            runner: ubuntu-latest
+            target: x86_64
+          # Windows x86_64
+          - name: Windows x86_64
+            runner: windows-latest
+            target: x86_64
+          # macOS ARM (Apple Silicon)
+          - name: macOS ARM64
+            runner: macos-latest
+            target: aarch64
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Python package (optimized)
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          sccache: 'true'
+          manylinux: auto
+
+      - name: Install built package
+        shell: bash
+        run: |
+          pip install python/dist/*.whl
+
+      - name: Display system information
+        shell: bash
+        run: |
+          echo "=== System Information ==="
+          python --version
+          python -c "import platform; print(f'Platform: {platform.platform()}')"
+          python -c "import platform; print(f'Processor: {platform.processor()}')"
+          python -c "import platform; print(f'Machine: {platform.machine()}')"
+          echo ""
+
+      - name: Run benchmark
+        shell: bash
+        run: |
+          echo "=== Running Benchmark ==="
+          python python/bench/bench.py
+          echo ""
+
+      - name: Run extended performance test
+        shell: bash
+        run: |
+          echo "=== Extended Performance Test ==="
+          python -c "
+          import fastuuidv7
+          import time
+          
+          # Warm up
+          for _ in range(10000):
+              fastuuidv7.gen_id_str()
+          
+          # Benchmark different call counts
+          for count in [100_000, 1_000_000, 10_000_000]:
+              start = time.perf_counter()
+              for _ in range(count):
+                  fastuuidv7.gen_id_str()
+              elapsed = time.perf_counter() - start
+              ops_per_sec = count / elapsed
+              ns_per_call = elapsed * 1e9 / count
+              print(f'{count:>10,} calls: {ops_per_sec:>15,.0f} ops/s  ({ns_per_call:>6.1f} ns/call)')
+          "
+          echo ""
+
+      - name: Memory efficiency test
+        shell: bash
+        run: |
+          echo "=== Memory Efficiency Test ==="
+          python -c "
+          import fastuuidv7
+          import sys
+          
+          # Test that we're not leaking memory
+          ids = []
+          for _ in range(100_000):
+              ids.append(fastuuidv7.gen_id_str())
+          
+          # Check string size
+          sample = ids[0]
+          print(f'UUID string length: {len(sample)} chars')
+          print(f'UUID string size: {sys.getsizeof(sample)} bytes')
+          print(f'Sample UUID: {sample}')
+          print(f'Generated {len(ids):,} UUIDs successfully')
+          "
+          echo ""
+
+      - name: Comparison with uuid.uuid4
+        shell: bash
+        run: |
+          echo "=== Comparison with uuid.uuid4() ==="
+          python -c "
+          import fastuuidv7
+          import uuid
+          import time
+          
+          count = 1_000_000
+          
+          # Benchmark fastuuidv7
+          start = time.perf_counter()
+          for _ in range(count):
+              fastuuidv7.gen_id_str()
+          elapsed_v7 = time.perf_counter() - start
+          
+          # Benchmark uuid.uuid4
+          start = time.perf_counter()
+          for _ in range(count):
+              str(uuid.uuid4())
+          elapsed_v4 = time.perf_counter() - start
+          
+          speedup = elapsed_v4 / elapsed_v7
+          
+          print(f'fastuuidv7.gen_id_str(): {count/elapsed_v7:>15,.0f} ops/s')
+          print(f'uuid.uuid4() + str():   {count/elapsed_v4:>15,.0f} ops/s')
+          print(f'Speedup: {speedup:.2f}x faster')
+          "
+          echo ""
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.platform.name }}
+          path: |
+            python/bench/
+          retention-days: 30
+
+  summary:
+    name: Benchmark Summary
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: always()
+    steps:
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          path: results
+
+      - name: Create summary
+        run: |
+          echo "# Python Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Benchmarks completed for:" >> $GITHUB_STEP_SUMMARY
+          echo "- Linux x86_64" >> $GITHUB_STEP_SUMMARY
+          echo "- Windows x86_64" >> $GITHUB_STEP_SUMMARY
+          echo "- macOS ARM64 (Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See individual job logs for detailed performance metrics." >> $GITHUB_STEP_SUMMARY
+
+# Made with Bob
