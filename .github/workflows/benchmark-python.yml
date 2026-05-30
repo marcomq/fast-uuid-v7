@@ -52,7 +52,7 @@ jobs:
         with:
           working-directory: python
           target: ${{ matrix.platform.target }}
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
           sccache: 'true'
           manylinux: auto
 
