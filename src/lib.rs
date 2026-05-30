@@ -8,138 +8,171 @@ use rand::{RngCore, SeedableRng};
 use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+struct TimeSample {
+    ms: u64,
+    nanos_within_ms: u32,
+}
+
+mod clock {
+    pub(super) struct Clock {
+        ticks_per_ms: u64,
+        next_deadline: u64,
+    }
+
+    impl Clock {
+        pub(super) fn new() -> Self {
+            Self {
+                ticks_per_ms: counter_ticks_per_ms(),
+                next_deadline: 0,
+            }
+        }
+
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        #[inline(always)]
+        pub(super) fn should_refresh(&self) -> bool {
+            deadline_reached(read_counter(), self.next_deadline)
+        }
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        #[inline(always)]
+        pub(super) fn should_refresh(&self) -> bool {
+            true
+        }
+
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        #[inline(always)]
+        pub(super) fn record_sample(&mut self, nanos_within_ms: u32) {
+            let ticks_until_next_ms = ticks_until_next_ms(self.ticks_per_ms, nanos_within_ms);
+            self.next_deadline = read_counter().wrapping_add(ticks_until_next_ms);
+        }
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        #[inline(always)]
+        pub(super) fn record_sample(&mut self, _nanos_within_ms: u32) {}
+    }
+
+    #[inline(always)]
+    pub(super) fn ticks_until_next_ms(ticks_per_ms: u64, nanos_within_ms: u32) -> u64 {
+        let nanos_into_ms = (nanos_within_ms % 1_000_000) as u64;
+        let nanos_until_next_ms = 1_000_000 - nanos_into_ms;
+        let ticks = ticks_per_ms
+            .saturating_mul(nanos_until_next_ms)
+            .saturating_add(999_999)
+            / 1_000_000;
+        ticks.max(1)
+    }
+
+    #[inline(always)]
+    pub(super) fn deadline_reached(current: u64, deadline: u64) -> bool {
+        deadline == 0 || current.wrapping_sub(deadline) < (1u64 << 63)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline(always)]
+    fn read_counter() -> u64 {
+        // SAFETY: _rdtsc is available on x86_64.
+        unsafe { std::arch::x86_64::_rdtsc() }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn counter_ticks_per_ms() -> u64 {
+        // Default to 2GHz (2000 MHz) if detection fails.
+        let mut base_mhz = 2000;
+
+        // SAFETY: cpuid is safe on x86_64.
+        unsafe {
+            let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
+            if max_leaf >= 0x16 {
+                let res = std::arch::x86_64::__cpuid(0x16);
+                if res.eax > 0 {
+                    base_mhz = res.eax as u64;
+                }
+            }
+        }
+
+        base_mhz * 1000
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[inline(always)]
+    fn read_counter() -> u64 {
+        let current_tsc: u64;
+        // SAFETY: reading cntvct_el0 is safe in userspace.
+        unsafe {
+            std::arch::asm!("mrs {}, cntvct_el0", out(reg) current_tsc, options(nomem, nostack, preserves_flags));
+        }
+        current_tsc
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn counter_ticks_per_ms() -> u64 {
+        let freq: u64;
+        // SAFETY: reading cntfrq_el0 is safe in userspace on Linux/macOS.
+        unsafe {
+            std::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq, options(nomem, nostack, preserves_flags));
+        }
+
+        (freq / 1000).max(1)
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[inline(always)]
+    fn read_counter() -> u64 {
+        0
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    fn counter_ticks_per_ms() -> u64 {
+        1
+    }
+}
+
 struct ThreadState {
     rng: SmallRng,
     last_ms: u64,
     counter: u32,
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    last_tsc: u64,
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    threshold: u64,
+    clock: clock::Clock,
 }
 
 impl ThreadState {
     fn new() -> Self {
-        let rng = SmallRng::from_rng(&mut rand::rng());
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            // Default to 2GHz (2000 MHz) if detection fails
-            let mut base_mhz = 2000;
-            // SAFETY: cpuid is safe on x86_64
-            unsafe {
-                let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
-                if max_leaf >= 0x16 {
-                    let res = std::arch::x86_64::__cpuid(0x16);
-                    if res.eax > 0 {
-                        base_mhz = res.eax as u64;
-                    }
-                }
-            }
-            // Threshold for ~0.1ms
-            let threshold = base_mhz * 100;
-            Self {
-                rng,
-                last_ms: 0,
-                counter: 0,
-                last_tsc: 0,
-                threshold,
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            let freq: u64;
-            // SAFETY: reading cntfrq_el0 is safe in userspace on Linux/macOS
-            unsafe {
-                std::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq, options(nomem, nostack, preserves_flags));
-            }
-            let threshold = freq / 10000; // 0.1ms
-            Self {
-                rng,
-                last_ms: 0,
-                counter: 0,
-                last_tsc: 0,
-                threshold,
-            }
-        }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        {
-            Self {
-                rng,
-                last_ms: 0,
-                counter: 0,
-            }
+        Self {
+            rng: SmallRng::from_rng(&mut rand::rng()),
+            last_ms: 0,
+            counter: 0,
+            clock: clock::Clock::new(),
         }
     }
 
     #[inline(always)]
-    fn should_check_time(&mut self) -> bool {
-        // We want to avoid calling SystemTime::now() (expensive) on every call.
-        // We force a check if:
-        // A significant amount of CPU time has passed since the last call (latency/sleep detection).
-        // This prevents using an old timestamp if the thread slept but the counter didn't wrap.
-        #[cfg(target_arch = "x86_64")]
-        {
-            // SAFETY: _rdtsc is available on x86_64
-            let current_tsc = unsafe { std::arch::x86_64::_rdtsc() };
-            if current_tsc.wrapping_sub(self.last_tsc) > self.threshold {
-                self.last_tsc = current_tsc;
-                true
-            } else {
-                false
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            let current_tsc: u64;
-            // SAFETY: reading cntvct_el0 is safe in userspace
-            unsafe {
-                std::arch::asm!("mrs {}, cntvct_el0", out(reg) current_tsc, options(nomem, nostack, preserves_flags));
-            }
-            if current_tsc.wrapping_sub(self.last_tsc) > self.threshold {
-                self.last_tsc = current_tsc;
-                true
-            } else {
-                false
-            }
-        }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        {
-            // WASM/others lack a cheap cycle counter. Check every call to be safe.
+    fn refresh_time(&mut self) -> bool {
+        let sample = system_time_sample();
+        self.clock.record_sample(sample.nanos_within_ms);
+
+        if sample.ms > self.last_ms {
+            self.last_ms = sample.ms;
+            self.counter = 0;
             true
+        } else {
+            false
         }
     }
 
     #[inline(always)]
     fn get_time(&mut self) -> u64 {
-        if self.should_check_time() {
-            let now = system_time_ms();
-            if now > self.last_ms {
-                self.last_ms = now;
-                self.counter = 0;
-            }
+        if self.last_ms == 0 || self.clock.should_refresh() {
+            self.refresh_time();
         }
         self.last_ms
     }
 
     #[inline(always)]
     fn get_time_and_counter(&mut self) -> (u64, u32) {
-        let should_check = self.should_check_time();
-
-        let mut current_timestamp = if should_check {
-            system_time_ms()
+        if (self.last_ms == 0 || self.clock.should_refresh()) && self.refresh_time() {
+            (self.last_ms, 0)
         } else {
-            self.last_ms
-        };
-
-        if current_timestamp > self.last_ms {
-            self.last_ms = current_timestamp;
-            self.counter = 0;
-            (current_timestamp, 0)
-        } else {
-            // Time hasn't moved forward (or we skipped checking).
-            current_timestamp = self.last_ms;
             let c = self.counter;
+            let mut current_timestamp = self.last_ms;
 
             // If counter is exhausted (18 bits = 262,143), increment timestamp to preserve monotonicity
             if c >= 0x3FFFF {
@@ -321,15 +354,16 @@ impl std::fmt::Display for UuidString {
     }
 }
 
-/// Returns the current time in milliseconds since the Unix epoch.
-///
-/// It returns `0` if the system clock hasn't started yet.
 #[inline]
-fn system_time_ms() -> u64 {
-    SystemTime::now()
+fn system_time_sample() -> TimeSample {
+    let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+        .unwrap_or_default();
+
+    TimeSample {
+        ms: duration.as_millis() as u64,
+        nanos_within_ms: duration.subsec_nanos() % 1_000_000,
+    }
 }
 
 /// Generates a UUID v7 with an 18-bit monotonic counter and 56 bits of randomness.
@@ -369,6 +403,34 @@ pub fn gen_id_with_count_str() -> UuidString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_deadline_is_reached_at_zero_or_after_deadline() {
+        assert!(clock::deadline_reached(10, 0));
+        assert!(clock::deadline_reached(10, 10));
+        assert!(clock::deadline_reached(11, 10));
+        assert!(!clock::deadline_reached(9, 10));
+    }
+
+    #[test]
+    fn test_deadline_handles_counter_wraparound() {
+        assert!(!clock::deadline_reached(u64::MAX - 1, 3));
+        assert!(clock::deadline_reached(3, u64::MAX - 1));
+    }
+
+    #[test]
+    fn test_ticks_until_next_ms_rounds_up_to_next_boundary() {
+        assert_eq!(clock::ticks_until_next_ms(1_000, 0), 1_000);
+        assert_eq!(clock::ticks_until_next_ms(1_000, 500_000), 500);
+        assert_eq!(clock::ticks_until_next_ms(1_000, 999_999), 1);
+        assert_eq!(clock::ticks_until_next_ms(1_000, 1_000_000), 1_000);
+    }
+
+    #[test]
+    fn test_ticks_until_next_ms_never_returns_zero() {
+        assert_eq!(clock::ticks_until_next_ms(0, 0), 1);
+        assert_eq!(clock::ticks_until_next_ms(1, 999_999), 1);
+    }
 
     #[test]
     /// test with `cargo test --release -- test_next_id_performance --nocapture`

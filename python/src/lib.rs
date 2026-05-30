@@ -21,7 +21,9 @@ fn gen_id_bytes(py: Python<'_>) -> Bound<'_, PyBytes> {
 #[pyfunction]
 fn format_uuid<'py>(py: Python<'py>, id: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyString>> {
     let id = id.extract::<u128>().map_err(|_| {
-        pyo3::exceptions::PyValueError::new_err("id must be an integer in the range 0 <= id < 2**128")
+        pyo3::exceptions::PyValueError::new_err(
+            "id must be an integer in the range 0 <= id < 2**128",
+        )
     })?;
 
     let formatted = fast_uuid_v7::format_uuid(id);

@@ -91,8 +91,8 @@ Generating 10 million IDs takes approximately **95ms** on a single core.
 ### How is it so fast?
 
 1.  **Thread-Local Storage**: No mutexes or atomic contention. Each thread has its own state and counters.
-2.  **Amortized Syscalls**: `SystemTime::now()` is expensive (~20-40ns). We use the internal CPU clock/tick (if available) to check for time passage, calling the actual system time only periodically.
-3.  **Hardware Counters**: To prevent clock drift during the batched calls, we use CPU cycle counters (`rdtsc` on x86, `cntvct_el0` on ARM) to detect thread sleeps or long pauses cheaply.
+2.  **Amortized Time Reads**: Reading wall-clock time is still more expensive than reading a CPU counter, so we avoid doing it on every call.
+3.  **Hardware Counters**: We use CPU cycle counters (`rdtsc` on x86, `cntvct_el0` on ARM) to cheaply detect when the next millisecond boundary should have been reached, and only then refresh the wall-clock timestamp.
 4.  **SmallRng**: Uses a fast, non-cryptographic pseudo-random number generator.
 5.  **Stack Allocation**: `gen_id_str` formats the UUID directly into a stack buffer, avoiding `malloc`.
 
@@ -101,7 +101,7 @@ Generating 10 million IDs takes approximately **95ms** on a single core.
 *   **Not Cryptographically Secure**: The randomness is optimized for speed, not unpredictability. Do not use for session tokens or secrets. If you don't need speed, use the original `uuid` crate.
 *   **Monotonicity**: Only guaranteed per-thread if using `gen_id_with_count`. Otherwise, IDs within the same millisecond are random.
 *   **Clock Drift Risk**: The batched timestamp check assumes the CPU counter frequency is stable. While we include safety checks, extreme edge cases (e.g., VM migration) might cause a 1ms timestamp lag.
-*   **Still needs SystemTime::now()**: The speed of 8ns is not constant and can only be achieved if we can skip calling `SystemTime::now()`. We still need to call `SystemTime::now()` from time to time, for example if the previous call was 1ms ago. In that case, we still need to call `SystemTime::now()` and the performance drops to about 50ns. This is still much faster than the original `uuid` crate.
+*   **Still needs wall-clock reads**: The fastest path only happens while we can reuse the last millisecond timestamp. Once the next millisecond boundary is due, we still need to refresh from `SystemTime::now()`, so actual throughput depends on workload and platform details.
 
 ### Benchmarking
 
