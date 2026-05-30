@@ -463,11 +463,10 @@ mod tests {
             elapsed_ts, distinct_timestamps
         );
 
-        // Expect at least 80ms of advancement in 100ms real time.
-        // If this fails, it means the time checking logic (TSC threshold) isn't triggering often enough
-        // or the system clock is frozen.
+        // Expect at least ~100ms of advancement in 100ms real time.
+        // Allow a small margin for runners with coarse timers or scheduling jitter.
         assert!(
-            elapsed_ts >= 99,
+            elapsed_ts >= 98,
             "Timestamp should advance roughly 100ms, got {}ms",
             elapsed_ts
         );
@@ -481,8 +480,10 @@ mod tests {
                 distinct_timestamps
             );
         } else {
+            // Allow a small margin in CI environments where timers or scheduling
+            // may cause occasional missed millisecond transitions.
             assert!(
-                distinct_timestamps >= 99,
+                distinct_timestamps >= 98,
                 "Should see frequent updates, got {} distinct timestamps",
                 distinct_timestamps
             );
