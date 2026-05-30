@@ -252,6 +252,9 @@ pub fn gen_id_string() -> String {
 }
 
 /// Generates a UUID v7 string on the stack, avoiding heap allocation.
+///
+/// The returned [`UuidString`] owns its bytes. Borrow it when passing it to APIs
+/// that need `&str`, or call [`UuidString::as_str`] explicitly.
 pub fn gen_id_str() -> UuidString {
     format_uuid(gen_id_u128())
 }
@@ -317,40 +320,55 @@ pub fn format_uuid(id: u128) -> UuidString {
 
 /// A stack-allocated string representation of a UUID (36 bytes).
 ///
-/// This type implements `Deref<Target=str>`, so it can be used like a `&str`.
-/// It avoids heap allocation, making it faster than `gen_id_string`.
+/// This type owns its bytes and implements `Deref<Target = str>` and
+/// `AsRef<str>`, so it can be borrowed by most APIs that need a string slice.
+/// It avoids heap allocation, making it faster than [`gen_id_string`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UuidString([u8; 36]);
 
-impl std::ops::Deref for UuidString {
-    type Target = str;
-    fn deref(&self) -> &str {
-        // SAFETY: The buffer is always filled with valid ASCII (hex + dashes)
+impl UuidString {
+    /// Returns this UUID as a string slice.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // SAFETY: The buffer is always filled with valid ASCII (hex + dashes).
         unsafe { std::str::from_utf8_unchecked(&self.0) }
     }
 }
 
+impl std::ops::Deref for UuidString {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl AsRef<str> for UuidString {
+    #[inline]
     fn as_ref(&self) -> &str {
-        self
+        self.as_str()
     }
 }
 
 impl PartialEq<str> for UuidString {
+    #[inline]
     fn eq(&self, other: &str) -> bool {
-        &**self == other
+        self.as_str() == other
     }
 }
 
 impl PartialEq<&str> for UuidString {
+    #[inline]
     fn eq(&self, other: &&str) -> bool {
-        &**self == *other
+        self.as_str() == *other
     }
 }
 
 impl std::fmt::Display for UuidString {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self)
+        f.write_str(self.as_str())
     }
 }
 
@@ -483,6 +501,18 @@ mod tests {
         let formatted = format_uuid(id);
         let uuid_crate_str = uuid::Uuid::from_u128(id).to_string();
         assert_eq!(formatted.as_ref(), uuid_crate_str);
+    }
+
+    #[test]
+    fn test_uuid_string_str_accessors() {
+        fn accepts_str(value: &str) -> usize {
+            value.len()
+        }
+
+        let formatted = gen_id_str();
+        assert_eq!(accepts_str(&formatted), 36);
+        assert_eq!(accepts_str(formatted.as_str()), 36);
+        assert!(uuid::Uuid::parse_str(formatted.as_str()).is_ok());
     }
 
     #[test]
