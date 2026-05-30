@@ -47,10 +47,11 @@ jobs:
           - runner: windows-latest
             os: windows
             target: x86_64
-          # Windows aarch64 (ARM64)
-          - runner: windows-latest
-            os: windows
-            target: aarch64
+          # Windows aarch64 (ARM64) - Disabled due to lack of Python dev libraries in CI
+          # Cross-compiling Python extensions for Windows ARM64 is not currently supported
+          # - runner: windows-latest
+          #   os: windows
+          #   target: aarch64
     
     steps:
       - name: Check out repository

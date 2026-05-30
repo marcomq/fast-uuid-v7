@@ -1,6 +1,6 @@
 [package]
 name = "fastuuidv7"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "Python bindings for fast-uuid-v7."
 license = "MIT"
