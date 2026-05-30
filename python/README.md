@@ -39,21 +39,18 @@ python3 bench/bench.py
 
 The benchmark measures repeated single calls, so the numbers include Python/native boundary overhead.
 
-Current local results on this machine:
+Current results on linux git runner:
 
 | Package | Callable | Time per call |
 | --- | --- | ---: |
-| `fastuuidv7` | `fastuuidv7.uuid7` | `246.6 ns` |
-| `fastuuid7` | `uuidv7.uuid7` | `275.8 ns` |
-| `uuid` stdlib | `uuid.uuid7` | `1608.9 ns` |
-| `uuid6` | `uuid6.uuid7` | `1977.0 ns` |
-| `uuid7` | `uuid_extensions.uuid7` | `1988.9 ns` |
-| `uuid-v7` | `uuid_v7.base.uuid7` | `2651.9 ns` |
+| `uuid6` | `uuid6.uuid7` | `2890.4 ns/call` |
+| `uuid7` | `uuid_extensions.uuid7` | `2767.7 ns` |
+| `fastuuid7` | `uuidv7.uuid7` | `313.5 ns` |
+| `fastuuidv7 ` | `fastuuidv7.uuid7` | `60.6 ns` |
 
 Notes:
 
 - These are single-call throughput measurements, so they include Python/native boundary overhead.
-- The `fastuuid7` result above came from a local macOS compatibility patch to its published source package, which currently links Linux `librt` unconditionally.
 
 ## Notes
 
