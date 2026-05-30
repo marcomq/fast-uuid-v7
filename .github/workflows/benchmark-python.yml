@@ -61,6 +61,13 @@ jobs:
         run: |
           pip install --find-links python/dist fastuuidv7
 
+      - name: Install comparison packages
+        shell: bash
+        run: |
+          pip install uuid6 || true
+          pip install uuid7 || true
+          pip install fastuuid7 || true
+
       - name: Display system information
         shell: bash
         run: |
