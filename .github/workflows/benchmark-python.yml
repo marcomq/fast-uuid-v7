@@ -59,7 +59,7 @@ jobs:
       - name: Install built package
         shell: bash
         run: |
-          pip install python/dist/*.whl
+          pip install --find-links python/dist fastuuidv7
 
       - name: Display system information
         shell: bash
