@@ -32,6 +32,9 @@ maturin develop
 import fastuuidv7
 
 raw = fastuuidv7.gen_id()
+raw_sub_ms_4 = fastuuidv7.gen_id_with_sub_ms_4()
+raw_sub_ms_8 = fastuuidv7.gen_id_with_sub_ms_8()
+raw_sub_ms_12 = fastuuidv7.gen_id_with_sub_ms_12()
 text = fastuuidv7.gen_id_str()
 data = fastuuidv7.gen_id_bytes()
 

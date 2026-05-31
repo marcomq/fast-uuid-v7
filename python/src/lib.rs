@@ -7,6 +7,21 @@ fn gen_id() -> u128 {
 }
 
 #[pyfunction]
+fn gen_id_with_sub_ms_4() -> u128 {
+    fast_uuid_v7::gen_id_with_sub_ms_4()
+}
+
+#[pyfunction]
+fn gen_id_with_sub_ms_8() -> u128 {
+    fast_uuid_v7::gen_id_with_sub_ms_8()
+}
+
+#[pyfunction]
+fn gen_id_with_sub_ms_12() -> u128 {
+    fast_uuid_v7::gen_id_with_sub_ms_12()
+}
+
+#[pyfunction]
 fn gen_id_str(py: Python<'_>) -> Bound<'_, PyString> {
     let uuid_str = fast_uuid_v7::gen_id_str();
     PyString::new(py, uuid_str.as_ref())
@@ -33,6 +48,9 @@ fn format_uuid<'py>(py: Python<'py>, id: &Bound<'py, PyAny>) -> PyResult<Bound<'
 #[pymodule]
 fn fastuuidv7(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gen_id, m)?)?;
+    m.add_function(wrap_pyfunction!(gen_id_with_sub_ms_4, m)?)?;
+    m.add_function(wrap_pyfunction!(gen_id_with_sub_ms_8, m)?)?;
+    m.add_function(wrap_pyfunction!(gen_id_with_sub_ms_12, m)?)?;
     m.add_function(wrap_pyfunction!(gen_id_str, m)?)?;
     m.add_function(wrap_pyfunction!(gen_id_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(format_uuid, m)?)?;

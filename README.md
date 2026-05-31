@@ -8,7 +8,7 @@ This implementation focuses on speed. It uses thread-local storage and a seeded 
 
 *   **UUID v7**: Time-ordered, 128-bit unique identifiers.
 *   **Fast**: Minimal overhead using thread-local state.
-*   **Flexible**: Choose between maximum randomness (`gen_id`) or per-thread monotonicity (`gen_id_with_count`).
+*   **Flexible**: Choose between maximum randomness (`gen_id`), optional sub-millisecond sort locality (`gen_id_with_sub_ms_4`, `gen_id_with_sub_ms_8`, `gen_id_with_sub_ms_12`), or per-thread monotonicity (`gen_id_with_count`).
 
 ## Why?
 
@@ -40,6 +40,11 @@ The `gen_id_with_count` function uses an 18-bit counter and 56 bits of randomnes
 *   **Pros**: Guarantees monotonicity per thread (up to ~262k IDs/ms).
 *   **Cons**: Reduced randomness (56 bits) increases collision risk in massive distributed systems (approx. 50% chance after 4.5 billion IDs/ms globally).
 
+### `gen_id_with_sub_ms_4`, `gen_id_with_sub_ms_8`, `gen_id_with_sub_ms_12`
+These functions keep the standard 48-bit millisecond timestamp, then place a scaled sub-millisecond fraction into the high bits of `rand_a` as described by RFC 9562. The remaining bits of `rand_a` stay random, and `rand_b` stays fully random. The millisecond timestamp comes from wall-clock time, but on supported counter backends the sub-millisecond fraction is often estimated between wall-clock refreshes instead of being freshly measured on every call.
+*   **Pros**: Improves sort locality for IDs created within the same millisecond without adding counters or shared state.
+*   **Cons**: This is not true nanosecond ordering, and it does not provide distributed monotonicity.
+
 ## Bit Layout
 
 The 128-bit ID is fully compatible with UUID v7. It is composed of:
@@ -52,12 +57,17 @@ The 128-bit ID is fully compatible with UUID v7. It is composed of:
 
 **Total Randomness:**
 *   `gen_id`: **74 bits**
+*   `gen_id_with_sub_ms_4`: **70 bits**
+*   `gen_id_with_sub_ms_8`: **66 bits**
+*   `gen_id_with_sub_ms_12`: **62 bits**
 *   `gen_id_with_count`: **56 bits**
 
 ## Usage
 
 ```rust
-use fast_uuid_v7::{gen_id, gen_id_string, gen_id_str, gen_id_with_count};
+use fast_uuid_v7::{
+    gen_id, gen_id_str, gen_id_string, gen_id_with_count, gen_id_with_sub_ms_8,
+};
 
 fn main() {
     // Get ID as u128 (74 bits random), takes about 8-50ns
@@ -67,6 +77,10 @@ fn main() {
     // Get monotonic ID (56 bits random + 18-bit counter)
     let ordered_id = gen_id_with_count();
     println!("Ordered ID: {:032x}", ordered_id);
+
+    // Get an ID with 8 bits of sub-millisecond time fraction in rand_a
+    let local_order_id = gen_id_with_sub_ms_8();
+    println!("Locally ordered ID: {:032x}", local_order_id);
 
     // Get ID as canonical string (allocates String, takes about 85-130ns)
     let id_string = gen_id_string();
@@ -100,6 +114,7 @@ Generating 10 million IDs takes approximately **95ms** on a single core.
 
 *   **Not Cryptographically Secure**: The randomness is optimized for speed, not unpredictability. Do not use for session tokens or secrets. If you don't need speed, use the original `uuid` crate.
 *   **Monotonicity**: Only guaranteed per-thread if using `gen_id_with_count`. Otherwise, IDs within the same millisecond are random.
+*   **Sub-millisecond fractions are approximate**: the `gen_id_with_sub_ms_*` variants improve intra-millisecond sort locality, but the extra bits are often estimated rather than freshly measured and are not a true higher-resolution timestamp.
 *   **Clock Drift Risk**: The batched timestamp check assumes the CPU counter frequency is stable. While we include safety checks, extreme edge cases (e.g., VM migration) might cause a 1ms timestamp lag.
 *   **Still needs wall-clock reads**: The fastest path only happens while we can reuse the last millisecond timestamp. Once the next millisecond boundary is due, we still need to refresh from `SystemTime::now()`, so actual throughput depends on workload and platform details.
 
