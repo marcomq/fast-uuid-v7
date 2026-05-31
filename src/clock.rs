@@ -1,4 +1,5 @@
 const NANOS_PER_MS: u64 = 1_000_000;
+const MAX_REFRESH_INTERVAL_NANOS: u64 = NANOS_PER_MS / 2;
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use counter_clock::CounterClock as Backend;
@@ -93,6 +94,11 @@ fn nanos_until_next_ms(nanos_within_ms: u32) -> u64 {
 }
 
 #[inline(always)]
+fn nanos_until_next_refresh(nanos_within_ms: u32) -> u64 {
+    nanos_until_next_ms(nanos_within_ms).min(MAX_REFRESH_INTERVAL_NANOS)
+}
+
+#[inline(always)]
 #[cfg(any(test, any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub(super) fn estimate_nanos_within_ms_from_ticks(
     ticks_per_ms: u64,
@@ -106,9 +112,9 @@ pub(super) fn estimate_nanos_within_ms_from_ticks(
 
 #[inline(always)]
 #[cfg(any(test, any(target_arch = "x86_64", target_arch = "aarch64")))]
-pub(super) fn ticks_until_next_ms(ticks_per_ms: u64, nanos_within_ms: u32) -> u64 {
+pub(super) fn ticks_until_next_refresh(ticks_per_ms: u64, nanos_within_ms: u32) -> u64 {
     let ticks = ticks_per_ms
-        .saturating_mul(nanos_until_next_ms(nanos_within_ms))
+        .saturating_mul(nanos_until_next_refresh(nanos_within_ms))
         .saturating_add(NANOS_PER_MS - 1)
         / NANOS_PER_MS;
     ticks.max(1)
@@ -179,7 +185,8 @@ fn counter_ticks_per_ms() -> u64 {
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 mod counter_clock {
     use super::{
-        deadline_reached, estimate_nanos_within_ms_from_ticks, read_counter, ticks_until_next_ms,
+        deadline_reached, estimate_nanos_within_ms_from_ticks, read_counter,
+        ticks_until_next_refresh,
     };
 
     pub(super) struct CounterClock {
@@ -205,9 +212,10 @@ mod counter_clock {
         #[inline(always)]
         pub(super) fn record_sample(&mut self, nanos_within_ms: u32) {
             let sampled_at = read_counter();
-            let ticks_until_next_ms = ticks_until_next_ms(self.ticks_per_ms, nanos_within_ms);
+            let ticks_until_next_refresh =
+                ticks_until_next_refresh(self.ticks_per_ms, nanos_within_ms);
             self.sampled_at = sampled_at;
-            self.next_deadline = sampled_at.wrapping_add(ticks_until_next_ms);
+            self.next_deadline = sampled_at.wrapping_add(ticks_until_next_refresh);
         }
 
         #[inline(always)]
