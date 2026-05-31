@@ -442,7 +442,7 @@ mod tests {
         let mut clock = clock::Clock::new();
         assert!(clock.should_refresh());
 
-        clock.record_sample(0);
+        clock.record_sample(0, 0);
         assert!(clock.should_refresh());
     }
 
