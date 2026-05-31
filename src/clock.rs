@@ -44,8 +44,8 @@ impl Clock {
     }
 
     #[inline(always)]
-    pub(crate) fn record_sample(&mut self, nanos_within_ms: u32) {
-        self.backend.record_sample(nanos_within_ms);
+    pub(crate) fn record_sample(&mut self, nanos_within_ms: u32, sampled_at: u64) {
+        self.backend.record_sample(nanos_within_ms, sampled_at);
     }
 
     #[inline(always)]
@@ -56,8 +56,8 @@ impl Clock {
 
     #[inline(always)]
     pub(crate) fn refresh_timestamp(&mut self) -> TimestampSample {
-        let sample = system_time_sample();
-        self.record_sample(sample.nanos_within_ms);
+        let (sample, sampled_at) = system_time_sample_with_counter();
+        self.record_sample(sample.nanos_within_ms, sampled_at);
         sample
     }
 
@@ -86,6 +86,22 @@ fn system_time_sample() -> TimestampSample {
         ms: duration.as_millis() as u64,
         nanos_within_ms: duration.subsec_nanos() % 1_000_000,
     }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline(always)]
+fn system_time_sample_with_counter() -> (TimestampSample, u64) {
+    let before = read_counter();
+    let sample = system_time_sample();
+    let after = read_counter();
+    let sampled_at = before.wrapping_add(after.wrapping_sub(before) / 2);
+    (sample, sampled_at)
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[inline(always)]
+fn system_time_sample_with_counter() -> (TimestampSample, u64) {
+    (system_time_sample(), 0)
 }
 
 #[inline(always)]
@@ -210,8 +226,7 @@ mod counter_clock {
         }
 
         #[inline(always)]
-        pub(super) fn record_sample(&mut self, nanos_within_ms: u32) {
-            let sampled_at = read_counter();
+        pub(super) fn record_sample(&mut self, nanos_within_ms: u32, sampled_at: u64) {
             let ticks_until_next_refresh =
                 ticks_until_next_refresh(self.ticks_per_ms, nanos_within_ms);
             self.sampled_at = sampled_at;
@@ -249,7 +264,7 @@ mod system_clock {
         }
 
         #[inline(always)]
-        pub(super) fn record_sample(&mut self, _nanos_within_ms: u32) {}
+        pub(super) fn record_sample(&mut self, _nanos_within_ms: u32, _sampled_at: u64) {}
 
         #[inline(always)]
         pub(super) fn estimate_nanos_within_ms(

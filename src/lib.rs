@@ -15,6 +15,7 @@ mod clock;
 struct ThreadState {
     rng: SmallRng,
     last_ms: u64,
+    last_nanos_within_ms: u32,
     last_sampled_nanos_within_ms: u32,
     counter: u32,
     clock: clock::Clock,
@@ -25,6 +26,7 @@ impl ThreadState {
         Self {
             rng: SmallRng::from_rng(&mut rand::rng()),
             last_ms: 0,
+            last_nanos_within_ms: 0,
             last_sampled_nanos_within_ms: 0,
             counter: 0,
             clock: clock::Clock::new(),
@@ -43,6 +45,14 @@ impl ThreadState {
     fn refresh_time(&mut self) -> bool {
         let sample = self.clock.refresh_timestamp();
         self.record_time_sample(sample, true)
+    }
+
+    #[inline(always)]
+    fn current_timestamp_sample(&self) -> clock::TimestampSample {
+        clock::TimestampSample {
+            ms: self.last_ms,
+            nanos_within_ms: self.last_nanos_within_ms,
+        }
     }
 
     #[inline(always)]
@@ -77,14 +87,20 @@ impl ThreadState {
 
     #[inline(always)]
     fn record_time_sample(&mut self, sample: clock::TimestampSample, refreshed: bool) -> bool {
-        if refreshed {
-            self.last_sampled_nanos_within_ms = sample.nanos_within_ms;
-        }
-
         if sample.ms > self.last_ms {
+            if refreshed {
+                self.last_sampled_nanos_within_ms = sample.nanos_within_ms;
+            }
             self.last_ms = sample.ms;
+            self.last_nanos_within_ms = sample.nanos_within_ms;
             self.counter = self.seed_counter();
             true
+        } else if sample.ms == self.last_ms {
+            if refreshed {
+                self.last_sampled_nanos_within_ms = sample.nanos_within_ms;
+            }
+            self.last_nanos_within_ms = self.last_nanos_within_ms.max(sample.nanos_within_ms);
+            false
         } else {
             false
         }
@@ -100,7 +116,7 @@ impl ThreadState {
                 .estimated_timestamp(self.last_ms, self.last_sampled_nanos_within_ms)
         };
         self.record_time_sample(sample, refreshed);
-        sample
+        self.current_timestamp_sample()
     }
 }
 
@@ -668,6 +684,60 @@ mod tests {
             distinct_timestamps,
             elapsed_ts
         );
+    }
+
+    #[test]
+    fn test_record_time_sample_ignores_older_millisecond_samples() {
+        let mut state = ThreadState::new();
+
+        assert!(state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 800_000,
+            },
+            true
+        ));
+        assert!(!state.record_time_sample(
+            clock::TimestampSample {
+                ms: 999,
+                nanos_within_ms: 100_000,
+            },
+            true
+        ));
+
+        assert_eq!(state.last_ms, 1_000);
+        assert_eq!(state.last_nanos_within_ms, 800_000);
+        assert_eq!(state.last_sampled_nanos_within_ms, 800_000);
+    }
+
+    #[test]
+    fn test_record_time_sample_keeps_same_millisecond_fraction_monotonic() {
+        let mut state = ThreadState::new();
+
+        assert!(state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 400_000,
+            },
+            true
+        ));
+        assert!(!state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 350_000,
+            },
+            false
+        ));
+        assert!(!state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 450_000,
+            },
+            true
+        ));
+
+        assert_eq!(state.current_timestamp_sample().nanos_within_ms, 450_000);
+        assert_eq!(state.last_sampled_nanos_within_ms, 450_000);
     }
 
     #[test]
