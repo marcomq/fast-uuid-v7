@@ -8,124 +8,15 @@ use rand::{RngCore, SeedableRng};
 use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const COUNTER_MAX: u32 = 0x3FFFF;
+const COUNTER_SEED_MASK: u32 = 0x0FFF;
+
 struct TimeSample {
     ms: u64,
     nanos_within_ms: u32,
 }
 
-mod clock {
-    pub(super) struct Clock {
-        ticks_per_ms: u64,
-        next_deadline: u64,
-    }
-
-    impl Clock {
-        pub(super) fn new() -> Self {
-            Self {
-                ticks_per_ms: counter_ticks_per_ms(),
-                next_deadline: 0,
-            }
-        }
-
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        #[inline(always)]
-        pub(super) fn should_refresh(&self) -> bool {
-            deadline_reached(read_counter(), self.next_deadline)
-        }
-
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        #[inline(always)]
-        pub(super) fn should_refresh(&self) -> bool {
-            true
-        }
-
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        #[inline(always)]
-        pub(super) fn record_sample(&mut self, nanos_within_ms: u32) {
-            let ticks_until_next_ms = ticks_until_next_ms(self.ticks_per_ms, nanos_within_ms);
-            self.next_deadline = read_counter().wrapping_add(ticks_until_next_ms);
-        }
-
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        #[inline(always)]
-        pub(super) fn record_sample(&mut self, _nanos_within_ms: u32) {}
-    }
-
-    #[inline(always)]
-    pub(super) fn ticks_until_next_ms(ticks_per_ms: u64, nanos_within_ms: u32) -> u64 {
-        let nanos_into_ms = (nanos_within_ms % 1_000_000) as u64;
-        let nanos_until_next_ms = 1_000_000 - nanos_into_ms;
-        let ticks = ticks_per_ms
-            .saturating_mul(nanos_until_next_ms)
-            .saturating_add(999_999)
-            / 1_000_000;
-        ticks.max(1)
-    }
-
-    #[inline(always)]
-    pub(super) fn deadline_reached(current: u64, deadline: u64) -> bool {
-        deadline == 0 || current.wrapping_sub(deadline) < (1u64 << 63)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[inline(always)]
-    fn read_counter() -> u64 {
-        // SAFETY: _rdtsc is available on x86_64.
-        unsafe { std::arch::x86_64::_rdtsc() }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn counter_ticks_per_ms() -> u64 {
-        // Default to 2GHz (2000 MHz) if detection fails.
-        let mut base_mhz = 2000;
-
-        // SAFETY: cpuid is safe on x86_64.
-        unsafe {
-            let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
-            if max_leaf >= 0x16 {
-                let res = std::arch::x86_64::__cpuid(0x16);
-                if res.eax > 0 {
-                    base_mhz = res.eax as u64;
-                }
-            }
-        }
-
-        base_mhz * 1000
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    #[inline(always)]
-    fn read_counter() -> u64 {
-        let current_tsc: u64;
-        // SAFETY: reading cntvct_el0 is safe in userspace.
-        unsafe {
-            std::arch::asm!("mrs {}, cntvct_el0", out(reg) current_tsc, options(nomem, nostack, preserves_flags));
-        }
-        current_tsc
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn counter_ticks_per_ms() -> u64 {
-        let freq: u64;
-        // SAFETY: reading cntfrq_el0 is safe in userspace on Linux/macOS.
-        unsafe {
-            std::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq, options(nomem, nostack, preserves_flags));
-        }
-
-        (freq / 1000).max(1)
-    }
-
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    #[inline(always)]
-    fn read_counter() -> u64 {
-        0
-    }
-
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    fn counter_ticks_per_ms() -> u64 {
-        1
-    }
-}
+mod clock;
 
 struct ThreadState {
     rng: SmallRng,
@@ -145,13 +36,21 @@ impl ThreadState {
     }
 
     #[inline(always)]
+    fn seed_counter(&mut self) -> u32 {
+        // RFC 9562 allows seeding only a portion of a fixed-length counter.
+        // We randomize the low 12 bits to keep the full 18-bit layout while
+        // preserving almost all per-millisecond headroom before rollover.
+        self.rng.next_u32() & COUNTER_SEED_MASK
+    }
+
+    #[inline(always)]
     fn refresh_time(&mut self) -> bool {
         let sample = system_time_sample();
         self.clock.record_sample(sample.nanos_within_ms);
 
         if sample.ms > self.last_ms {
             self.last_ms = sample.ms;
-            self.counter = 0;
+            self.counter = self.seed_counter();
             true
         } else {
             false
@@ -169,17 +68,17 @@ impl ThreadState {
     #[inline(always)]
     fn get_time_and_counter(&mut self) -> (u64, u32) {
         if (self.last_ms == 0 || self.clock.should_refresh()) && self.refresh_time() {
-            (self.last_ms, 0)
+            (self.last_ms, self.counter)
         } else {
             let c = self.counter;
             let mut current_timestamp = self.last_ms;
 
             // If counter is exhausted (18 bits = 262,143), increment timestamp to preserve monotonicity
-            if c >= 0x3FFFF {
+            if c >= COUNTER_MAX {
                 current_timestamp += 1;
                 self.last_ms = current_timestamp;
-                self.counter = 0;
-                (current_timestamp, 0)
+                self.counter = self.seed_counter();
+                (current_timestamp, self.counter)
             } else {
                 let inc = c.wrapping_add(1);
                 self.counter = inc;
@@ -384,7 +283,7 @@ fn system_time_sample() -> TimeSample {
     }
 }
 
-/// Generates a UUID v7 with an 18-bit monotonic counter and 56 bits of randomness.
+/// Generates a UUID v7 with an RFC-style seeded 18-bit monotonic counter and 56 bits of randomness.
 ///
 /// This guarantees per-thread monotonicity (up to ~262k IDs/ms) but has higher
 /// collision risk across different nodes if the random part is exhausted.
@@ -448,6 +347,16 @@ mod tests {
     fn test_ticks_until_next_ms_never_returns_zero() {
         assert_eq!(clock::ticks_until_next_ms(0, 0), 1);
         assert_eq!(clock::ticks_until_next_ms(1, 999_999), 1);
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[test]
+    fn test_clock_without_counter_backend_always_refreshes() {
+        let mut clock = clock::Clock::new();
+        assert!(clock.should_refresh());
+
+        clock.record_sample(0);
+        assert!(clock.should_refresh());
     }
 
     #[test]
@@ -584,21 +493,16 @@ mod tests {
 
     #[test]
     fn test_counter_reset() {
-        let start_ts = gen_id_with_count() >> 80;
-        loop {
-            let id = gen_id_with_count();
-            let ts = id >> 80;
-            if ts > start_ts {
-                let counter_high = (id >> 64) & 0xFFF;
-                let counter_low = (id >> 56) & 0x3F;
-                let counter = (counter_high << 6) | counter_low;
+        let mut state = ThreadState::new();
 
-                assert_eq!(
-                    counter, 0,
-                    "Counter should reset to 0 when timestamp changes"
-                );
-                break;
-            }
-        }
+        assert!(
+            state.refresh_time(),
+            "A fresh thread state should accept the first timestamp sample"
+        );
+        assert_eq!(
+            state.counter & !COUNTER_SEED_MASK,
+            0,
+            "Seeded counter should start in the low 12 bits"
+        );
     }
 }

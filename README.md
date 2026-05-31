@@ -36,7 +36,7 @@ The default `gen_id` (and `gen_id_u128`) uses all available 74 bits for randomne
 *   **Cons**: IDs generated within the same millisecond on the same thread are not guaranteed to be monotonic (they will be random).
 
 ### `gen_id_with_count` (56 bits randomness + 18-bit counter)
-The `gen_id_with_count` function uses an 18-bit counter and 56 bits of randomness.
+The `gen_id_with_count` function uses an 18-bit counter and 56 bits of randomness. On each new millisecond tick, the counter is RFC-style seeded before continuing monotonically on that thread.
 *   **Pros**: Guarantees monotonicity per thread (up to ~262k IDs/ms).
 *   **Cons**: Reduced randomness (56 bits) increases collision risk in massive distributed systems (approx. 50% chance after 4.5 billion IDs/ms globally).
 
