@@ -62,6 +62,7 @@ def resolve_benchmarks():
         ("uuid6", "uuid6", [("uuid6", ["uuid7"])]),
         ("uuid-v7", "uuid-v7", [("uuid_v7", ["uuid7"]), ("uuid_v7.base", ["uuid7"])]),
         ("uuid7", "uuid7", [("uuid7", ["uuid7"]), ("uuid_extensions", ["uuid7", "uuid7str"])]),
+        ("uuid-utils", "uuid-utils", [("uuid_utils", ["uuid7"])]),
         ("uuidv7", "uuidv7", [("uuidv7", ["uuid7", "uuidv7", "generate"])]),
         (
             "fastuuid7",

@@ -66,6 +66,7 @@ jobs:
         run: |
           pip install uuid6 || true
           pip install uuid7 || true
+          pip install uuid-utils || true
           pip install fastuuid7 || true
 
       - name: Display system information
