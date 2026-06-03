@@ -155,14 +155,11 @@ fn counter_ticks_per_ms() -> u64 {
     // Default to 2GHz (2000 MHz) if detection fails.
     let mut base_mhz = 2000;
 
-    // SAFETY: cpuid is safe on x86_64.
-    unsafe {
-        let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
-        if max_leaf >= 0x16 {
-            let res = std::arch::x86_64::__cpuid(0x16);
-            if res.eax > 0 {
-                base_mhz = res.eax as u64;
-            }
+    let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
+    if max_leaf >= 0x16 {
+        let res = std::arch::x86_64::__cpuid(0x16);
+        if res.eax > 0 {
+            base_mhz = res.eax as u64;
         }
     }
 
