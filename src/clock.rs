@@ -22,8 +22,9 @@ impl TimestampSample {
             return 0;
         }
 
+        let nanos_within_ms = self.nanos_within_ms.min(999_999);
         let slots = 1u32 << bits;
-        ((self.nanos_within_ms * slots) / 1_000_000) as u16
+        ((nanos_within_ms * slots) / 1_000_000) as u16
     }
 }
 
@@ -294,5 +295,17 @@ mod tests {
             estimate_nanos_within_ms_from_ticks(1_000, 900_000, 200),
             999_999
         );
+    }
+
+    #[test]
+    fn test_sub_ms_fraction_clamps_exact_millisecond_boundary() {
+        let sample = TimestampSample {
+            ms: 0,
+            nanos_within_ms: 1_000_000,
+        };
+
+        assert_eq!(sample.sub_ms_fraction(4), 15);
+        assert_eq!(sample.sub_ms_fraction(8), 255);
+        assert_eq!(sample.sub_ms_fraction(12), 4095);
     }
 }

@@ -75,6 +75,8 @@ impl ThreadState {
             if c >= COUNTER_MAX {
                 current_timestamp += 1;
                 self.last_ms = current_timestamp;
+                self.last_nanos_within_ms = 0;
+                self.last_sampled_nanos_within_ms = 0;
                 self.counter = self.seed_counter();
                 (current_timestamp, self.counter)
             } else {
@@ -572,6 +574,17 @@ mod tests {
     }
 
     #[test]
+    fn test_exact_millisecond_boundary_sub_ms_fraction_stays_in_last_bucket() {
+        let sample = clock::TimestampSample {
+            ms: 0,
+            nanos_within_ms: 1_000_000,
+        };
+        let rand_a = compose_rand_a(0, sample.sub_ms_fraction(12), 12);
+
+        assert_eq!(rand_a, 0x0FFF);
+    }
+
+    #[test]
     fn test_rand_b_remains_random() {
         let timestamp = 1_748_000_000_000u64;
         let rand_a = 0x0ABCu16;
@@ -753,5 +766,21 @@ mod tests {
             0,
             "Seeded counter should start in the low 12 bits"
         );
+    }
+
+    #[test]
+    fn test_counter_rollover_resets_cached_sub_ms_state() {
+        let mut state = ThreadState::new();
+        assert!(state.refresh_time());
+        let previous_ms = state.last_ms;
+        state.last_nanos_within_ms = 900_000;
+        state.last_sampled_nanos_within_ms = 900_000;
+        state.counter = COUNTER_MAX;
+
+        let (timestamp, _) = state.get_time_and_counter();
+
+        assert_eq!(timestamp, previous_ms + 1);
+        assert_eq!(state.current_timestamp_sample().nanos_within_ms, 0);
+        assert_eq!(state.last_sampled_nanos_within_ms, 0);
     }
 }
