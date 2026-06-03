@@ -32,6 +32,9 @@ maturin develop
 import fastuuidv7
 
 raw = fastuuidv7.gen_id()
+raw_sub_ms_4 = fastuuidv7.gen_id_with_sub_ms_4()
+raw_sub_ms_8 = fastuuidv7.gen_id_with_sub_ms_8()
+raw_sub_ms_12 = fastuuidv7.gen_id_with_sub_ms_12()
 text = fastuuidv7.gen_id_str()
 data = fastuuidv7.gen_id_bytes()
 
@@ -54,18 +57,24 @@ python3 bench/bench.py
 
 The benchmark measures repeated single calls, so the numbers include Python/native boundary overhead.
 
-Current results on linux amd64_x86 git runner:
+Current results on macOS arm64 with Python 3.14.4:
 
 | Package | Callable | Time per call |
 | --- | --- | ---: |
-| `uuid6` | `uuid6.uuid7` | `2890.4 ns` |
-| `uuid7` | `uuid_extensions.uuid7` | `2767.7 ns` |
-| `fastuuid7` | `uuidv7.uuid7` | `313.5 ns` |
-| `fastuuidv7 ` | `fastuuidv7.uuid7` | `60.6 ns` |
+| `uuid6` | `uuid6.uuid7` | `1999.5 ns` |
+| `uuid-v7` | `uuid_v7.base.uuid7` | `2582.4 ns` |
+| `uuid7` | `uuid_extensions.uuid7` | `1969.2 ns` |
+| `uuid` | `uuid.uuid7` | `1579.9 ns` |
+| [`fastuuid7`](https://github.com/nekrasovp/uuidv7) | `uuidv7.uuid7` | `298.6 ns` |
+| [`uuid-utils`](https://github.com/aminalaee/uuid-utils) | `uuid_utils.uuid7` | `96.8 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7` | `51.0 ns` |
+
+The linux x86 GH runner has similar times. It is running always in this repo.
 
 Notes:
 
 - These are single-call throughput measurements, so they include Python/native boundary overhead.
+- Install comparison packages such as `uuid-utils` before running; missing packages are skipped.
 
 ## Notes
 

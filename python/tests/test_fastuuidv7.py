@@ -8,6 +8,18 @@ class FastUuidV7Tests(unittest.TestCase):
     def test_gen_id_returns_int(self):
         self.assertIsInstance(fastuuidv7.gen_id(), int)
 
+    def test_gen_id_with_sub_ms_variants_return_uuid_v7_ints(self):
+        for name in (
+            "gen_id_with_sub_ms_4",
+            "gen_id_with_sub_ms_8",
+            "gen_id_with_sub_ms_12",
+        ):
+            with self.subTest(name=name):
+                raw = getattr(fastuuidv7, name)()
+                self.assertIsInstance(raw, int)
+                parsed = uuid.UUID(int=raw)
+                self.assertEqual(parsed.version, 7)
+
     def test_gen_id_str_is_uuid_v7(self):
         parsed = uuid.UUID(fastuuidv7.gen_id_str())
         self.assertEqual(parsed.version, 7)

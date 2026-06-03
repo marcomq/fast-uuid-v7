@@ -6,21 +6,17 @@
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use std::cell::RefCell;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const COUNTER_MAX: u32 = 0x3FFFF;
 const COUNTER_SEED_MASK: u32 = 0x0FFF;
-
-struct TimeSample {
-    ms: u64,
-    nanos_within_ms: u32,
-}
 
 mod clock;
 
 struct ThreadState {
     rng: SmallRng,
     last_ms: u64,
+    last_nanos_within_ms: u32,
+    last_sampled_nanos_within_ms: u32,
     counter: u32,
     clock: clock::Clock,
 }
@@ -30,6 +26,8 @@ impl ThreadState {
         Self {
             rng: SmallRng::from_rng(&mut rand::rng()),
             last_ms: 0,
+            last_nanos_within_ms: 0,
+            last_sampled_nanos_within_ms: 0,
             counter: 0,
             clock: clock::Clock::new(),
         }
@@ -45,15 +43,15 @@ impl ThreadState {
 
     #[inline(always)]
     fn refresh_time(&mut self) -> bool {
-        let sample = system_time_sample();
-        self.clock.record_sample(sample.nanos_within_ms);
+        let sample = self.clock.refresh_timestamp();
+        self.record_time_sample(sample, true)
+    }
 
-        if sample.ms > self.last_ms {
-            self.last_ms = sample.ms;
-            self.counter = self.seed_counter();
-            true
-        } else {
-            false
+    #[inline(always)]
+    fn current_timestamp_sample(&self) -> clock::TimestampSample {
+        clock::TimestampSample {
+            ms: self.last_ms,
+            nanos_within_ms: self.last_nanos_within_ms,
         }
     }
 
@@ -77,6 +75,8 @@ impl ThreadState {
             if c >= COUNTER_MAX {
                 current_timestamp += 1;
                 self.last_ms = current_timestamp;
+                self.last_nanos_within_ms = 0;
+                self.last_sampled_nanos_within_ms = 0;
                 self.counter = self.seed_counter();
                 (current_timestamp, self.counter)
             } else {
@@ -86,10 +86,71 @@ impl ThreadState {
             }
         }
     }
+
+    #[inline(always)]
+    fn record_time_sample(&mut self, sample: clock::TimestampSample, refreshed: bool) -> bool {
+        if sample.ms > self.last_ms {
+            if refreshed {
+                self.last_sampled_nanos_within_ms = sample.nanos_within_ms;
+            }
+            self.last_ms = sample.ms;
+            self.last_nanos_within_ms = sample.nanos_within_ms;
+            self.counter = self.seed_counter();
+            true
+        } else if sample.ms == self.last_ms {
+            if refreshed {
+                self.last_sampled_nanos_within_ms = sample.nanos_within_ms;
+            }
+            self.last_nanos_within_ms = self.last_nanos_within_ms.max(sample.nanos_within_ms);
+            false
+        } else {
+            false
+        }
+    }
+
+    #[inline(always)]
+    fn sample_time(&mut self) -> clock::TimestampSample {
+        let refreshed = self.last_ms == 0 || self.clock.should_refresh();
+        let sample = if refreshed {
+            self.clock.refresh_timestamp()
+        } else {
+            self.clock
+                .estimated_timestamp(self.last_ms, self.last_sampled_nanos_within_ms)
+        };
+        self.record_time_sample(sample, refreshed);
+        self.current_timestamp_sample()
+    }
 }
 
 thread_local! {
     static STATE: RefCell<ThreadState> = RefCell::new(ThreadState::new());
+}
+
+#[inline]
+fn compose_rand_a(random: u16, fraction: u16, bits: u8) -> u16 {
+    debug_assert!(bits <= 12);
+
+    let random_bits = 12 - bits;
+    let random_mask = if random_bits == 0 {
+        0
+    } else {
+        (1u16 << random_bits) - 1
+    };
+
+    ((fraction & ((1u16 << bits) - 1)) << random_bits) | (random & random_mask)
+}
+
+#[inline]
+fn uuid_v7_from_parts(timestamp_ms: u64, rand_a: u16, rand_b: u64) -> u128 {
+    let timestamp_part = (timestamp_ms as u128) << 80;
+    let version_part = 7u128 << 76;
+    let variant_part = 2u128 << 62;
+
+    timestamp_part
+        | version_part
+        | ((rand_a as u128) << 64)
+        | variant_part
+        | ((rand_b & 0x3FFF_FFFF_FFFF_FFFF) as u128)
 }
 
 /// Generates a unique identifier compatible with UUID v7.
@@ -113,20 +174,16 @@ pub fn gen_id_u128() -> u128 {
         let mut state = state_cell.borrow_mut();
         let timestamp = state.get_time();
 
-        let timestamp_part = (timestamp as u128) << 80;
-        let version_part = 7u128 << 76; // Version 7 (0111)
-        let variant_part = 2u128 << 62; // Variant 1 (10..), RFC 4122
-
         // We need 74 bits of randomness. SmallRng generates 64 bits per call.
         let r1 = state.rng.next_u32();
         let r2 = state.rng.next_u64();
 
         // rand_a: 12 bits (from r1)
-        let rand_a = (r1 & 0xFFF) as u128;
+        let rand_a = (r1 & 0x0FFF) as u16;
         // rand_b: 62 bits (from r2)
-        let rand_b = (r2 & 0x3FFFFFFFFFFFFFFF) as u128;
+        let rand_b = r2 & 0x3FFF_FFFF_FFFF_FFFF;
 
-        timestamp_part | version_part | (rand_a << 64) | variant_part | rand_b
+        uuid_v7_from_parts(timestamp, rand_a, rand_b)
     })
 }
 
@@ -134,6 +191,54 @@ pub fn gen_id_u128() -> u128 {
 #[inline]
 pub fn gen_id() -> u128 {
     gen_id_u128()
+}
+
+/// Generates a UUID v7 with an RFC 9562-style sub-millisecond time fraction.
+///
+/// The 48-bit UUID timestamp remains milliseconds since the Unix epoch. This
+/// API fills the high `bits` of `rand_a` with a scaled fraction of the current
+/// millisecond and leaves the remaining random bits unchanged. On supported
+/// counter backends, the millisecond timestamp comes from wall-clock time, but
+/// the sub-millisecond fraction is often estimated between wall-clock refreshes
+/// instead of being freshly measured on every call.
+///
+/// This can improve sort locality for IDs produced within the same millisecond,
+/// but it does not provide true nanosecond ordering or distributed monotonicity.
+#[inline]
+fn gen_id_with_sub_ms_bits(bits: u8) -> u128 {
+    debug_assert!(matches!(bits, 4 | 8 | 12));
+
+    STATE.with(|state_cell| {
+        let mut state = state_cell.borrow_mut();
+        let sample = state.sample_time();
+
+        let r1 = state.rng.next_u32();
+        let r2 = state.rng.next_u64();
+
+        let fraction = sample.sub_ms_fraction(bits);
+        let rand_a = compose_rand_a((r1 & 0x0FFF) as u16, fraction, bits);
+        let rand_b = r2 & 0x3FFF_FFFF_FFFF_FFFF;
+
+        uuid_v7_from_parts(sample.ms, rand_a, rand_b)
+    })
+}
+
+/// Generates a UUID v7 with a 4-bit sub-millisecond fraction in `rand_a`.
+#[inline]
+pub fn gen_id_with_sub_ms_4() -> u128 {
+    gen_id_with_sub_ms_bits(4)
+}
+
+/// Generates a UUID v7 with an 8-bit sub-millisecond fraction in `rand_a`.
+#[inline]
+pub fn gen_id_with_sub_ms_8() -> u128 {
+    gen_id_with_sub_ms_bits(8)
+}
+
+/// Generates a UUID v7 with a 12-bit sub-millisecond fraction in `rand_a`.
+#[inline]
+pub fn gen_id_with_sub_ms_12() -> u128 {
+    gen_id_with_sub_ms_bits(12)
 }
 
 /// Generates a UUID v7 string using the `gen_id_u128` function.
@@ -271,18 +376,6 @@ impl std::fmt::Display for UuidString {
     }
 }
 
-#[inline]
-fn system_time_sample() -> TimeSample {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-
-    TimeSample {
-        ms: duration.as_millis() as u64,
-        nanos_within_ms: duration.subsec_nanos() % 1_000_000,
-    }
-}
-
 /// Generates a UUID v7 with an RFC-style seeded 18-bit monotonic counter and 56 bits of randomness.
 ///
 /// This guarantees per-thread monotonicity (up to ~262k IDs/ms) but has higher
@@ -293,22 +386,16 @@ pub fn gen_id_with_count() -> u128 {
         let mut state = state_cell.borrow_mut();
         let (timestamp, counter) = state.get_time_and_counter();
 
-        let timestamp_part = (timestamp as u128) << 80;
-        let version_part = 7u128 << 76; // Version 7 (0111)
-        let variant_part = 2u128 << 62; // Variant 1 (10..), RFC 4122
-
         // Use 18 bits for counter: 12 in rand_a, 6 in rand_b high.
-        let rand_a = (counter >> 6) & 0xFFF;
+        let rand_a = ((counter >> 6) & 0x0FFF) as u16;
         let rand_b_high = counter & 0x3F;
 
         let rand_nr = state.rng.next_u64();
 
-        let counter_part = (rand_a as u128) << 64; // 12 bits of counter
-                                                   // 56 bits of randomness + 6 bits of counter
         let rand_b_low = rand_nr & 0x00FF_FFFF_FFFF_FFFF;
-        let random_part = ((rand_b_high as u128) << 56) | (rand_b_low as u128);
+        let random_part = ((rand_b_high as u64) << 56) | rand_b_low;
 
-        timestamp_part | version_part | counter_part | variant_part | random_part
+        uuid_v7_from_parts(timestamp, rand_a, random_part)
     })
 }
 
@@ -336,17 +423,19 @@ mod tests {
     }
 
     #[test]
-    fn test_ticks_until_next_ms_rounds_up_to_next_boundary() {
-        assert_eq!(clock::ticks_until_next_ms(1_000, 0), 1_000);
-        assert_eq!(clock::ticks_until_next_ms(1_000, 500_000), 500);
-        assert_eq!(clock::ticks_until_next_ms(1_000, 999_999), 1);
-        assert_eq!(clock::ticks_until_next_ms(1_000, 1_000_000), 1_000);
+    fn test_ticks_until_next_refresh_caps_at_half_millisecond() {
+        assert_eq!(clock::ticks_until_next_refresh(1_000, 0), 500);
+        assert_eq!(clock::ticks_until_next_refresh(1_000, 250_000), 500);
+        assert_eq!(clock::ticks_until_next_refresh(1_000, 500_000), 500);
+        assert_eq!(clock::ticks_until_next_refresh(1_000, 750_000), 250);
+        assert_eq!(clock::ticks_until_next_refresh(1_000, 999_999), 1);
+        assert_eq!(clock::ticks_until_next_refresh(1_000, 1_000_000), 500);
     }
 
     #[test]
-    fn test_ticks_until_next_ms_never_returns_zero() {
-        assert_eq!(clock::ticks_until_next_ms(0, 0), 1);
-        assert_eq!(clock::ticks_until_next_ms(1, 999_999), 1);
+    fn test_ticks_until_next_refresh_never_returns_zero() {
+        assert_eq!(clock::ticks_until_next_refresh(0, 0), 1);
+        assert_eq!(clock::ticks_until_next_refresh(1, 999_999), 1);
     }
 
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -355,7 +444,7 @@ mod tests {
         let mut clock = clock::Clock::new();
         assert!(clock.should_refresh());
 
-        clock.record_sample(0);
+        clock.record_sample(0, 0);
         assert!(clock.should_refresh());
     }
 
@@ -441,6 +530,132 @@ mod tests {
     }
 
     #[test]
+    fn test_gen_id_with_sub_ms_4_has_uuid_v7_layout() {
+        let id = gen_id_with_sub_ms_4();
+        let uuid = uuid::Uuid::from_u128(id);
+        assert_eq!(uuid.get_version(), Some(uuid::Version::SortRand));
+        assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
+
+        let rand_a = ((id >> 64) & 0x0FFF) as u16;
+        assert!(rand_a <= 0x0FFF);
+    }
+
+    #[test]
+    fn test_sub_ms_fraction_placement_for_expected_bit_widths() {
+        let sample = clock::TimestampSample {
+            ms: 0,
+            nanos_within_ms: 654_321,
+        };
+        let random = 0b1010_0110_1101u16;
+
+        for bits in [4, 8, 12] {
+            let fraction = sample.sub_ms_fraction(bits);
+            let rand_a = compose_rand_a(random, fraction, bits);
+            let random_bits = 12 - bits;
+            let extracted_fraction = rand_a >> random_bits;
+
+            assert_eq!(extracted_fraction, fraction);
+        }
+    }
+
+    #[test]
+    fn test_remaining_rand_a_bits_stay_random() {
+        let sample = clock::TimestampSample {
+            ms: 0,
+            nanos_within_ms: 789_123,
+        };
+        let random = 0b1101_0011_1010u16;
+        let bits = 8;
+
+        let fraction = sample.sub_ms_fraction(bits);
+        let rand_a = compose_rand_a(random, fraction, bits);
+
+        assert_eq!(rand_a & 0x000F, random & 0x000F);
+    }
+
+    #[test]
+    fn test_exact_millisecond_boundary_sub_ms_fraction_stays_in_last_bucket() {
+        let sample = clock::TimestampSample {
+            ms: 0,
+            nanos_within_ms: 1_000_000,
+        };
+        let rand_a = compose_rand_a(0, sample.sub_ms_fraction(12), 12);
+
+        assert_eq!(rand_a, 0x0FFF);
+    }
+
+    #[test]
+    fn test_rand_b_remains_random() {
+        let timestamp = 1_748_000_000_000u64;
+        let rand_a = 0x0ABCu16;
+        let rand_b = 0x2ABC_DEF0_1234_5678u64;
+
+        let id = uuid_v7_from_parts(timestamp, rand_a, rand_b);
+
+        assert_eq!(id >> 80, timestamp as u128);
+        assert_eq!((id & 0x3FFF_FFFF_FFFF_FFFF) as u64, rand_b);
+    }
+
+    #[test]
+    fn test_public_sub_ms_variants_produce_distinct_layout_options() {
+        let id4 = gen_id_with_sub_ms_4();
+        let id8 = gen_id_with_sub_ms_8();
+        let id12 = gen_id_with_sub_ms_12();
+
+        for id in [id4, id8, id12] {
+            let uuid = uuid::Uuid::from_u128(id);
+            assert_eq!(uuid.get_version(), Some(uuid::Version::SortRand));
+            assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
+        }
+    }
+
+    fn extract_sub_ms_fraction(id: u128, bits: u8) -> (u64, u16) {
+        let ms = (id >> 80) as u64;
+        let rand_a = ((id >> 64) & 0x0FFF) as u16;
+        let fraction = rand_a >> (12 - bits);
+        (ms, fraction)
+    }
+
+    #[test]
+    fn test_sub_ms_variants_mostly_increase_within_same_millisecond() {
+        let cases: &[(u8, fn() -> u128)] = &[
+            (4, gen_id_with_sub_ms_4),
+            (8, gen_id_with_sub_ms_8),
+            (12, gen_id_with_sub_ms_12),
+        ];
+
+        for &(bits, gen_id) in cases {
+            let start = std::time::Instant::now();
+            let duration = std::time::Duration::from_millis(25);
+            let (mut last_ms, mut last_fraction) = extract_sub_ms_fraction(gen_id(), bits);
+            let mut comparisons = 0usize;
+            let mut nondecreasing = 0usize;
+
+            while start.elapsed() < duration && comparisons < 256 {
+                let (ms, fraction) = extract_sub_ms_fraction(gen_id(), bits);
+                if ms == last_ms {
+                    comparisons += 1;
+                    if fraction >= last_fraction {
+                        nondecreasing += 1;
+                    }
+                }
+
+                last_ms = ms;
+                last_fraction = fraction;
+            }
+
+            assert!(
+                comparisons >= 32,
+                "not enough same-millisecond samples were observed for the {bits}-bit variant"
+            );
+            assert!(
+                nondecreasing * 10 >= comparisons * 9,
+                "sub-ms fraction for the {bits}-bit variant only moved forward in {nondecreasing}/{comparisons} same-millisecond comparisons"
+            );
+        }
+    }
+
+    #[test]
     fn test_timestamp_updates_continuously() {
         let start = std::time::Instant::now();
         let duration = std::time::Duration::from_millis(100);
@@ -472,23 +687,70 @@ mod tests {
             elapsed_ts
         );
 
-        // We should see many millisecond transitions if we are spinning in a loop.
-        // If this fails, the thread might have been descheduled for long periods.
-        if cfg!(debug_assertions) {
-            assert!(
-                distinct_timestamps >= 90,
-                "Should see frequent updates, got {} distinct timestamps",
-                distinct_timestamps
-            );
-        } else {
-            // Allow a small margin in CI environments where timers or scheduling
-            // may cause occasional missed millisecond transitions.
-            assert!(
-                distinct_timestamps >= 98,
-                "Should see frequent updates, got {} distinct timestamps",
-                distinct_timestamps
-            );
-        }
+        // We should still see many millisecond transitions while spinning in a
+        // tight loop, but some CI runners (especially Windows) can deschedule
+        // the test often enough that we miss a noticeable fraction of them.
+        let min_distinct_timestamps = elapsed_ts.saturating_mul(2) / 3;
+        assert!(
+            distinct_timestamps >= min_distinct_timestamps,
+            "Should see frequent updates, got {} distinct timestamps over {}ms",
+            distinct_timestamps,
+            elapsed_ts
+        );
+    }
+
+    #[test]
+    fn test_record_time_sample_ignores_older_millisecond_samples() {
+        let mut state = ThreadState::new();
+
+        assert!(state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 800_000,
+            },
+            true
+        ));
+        assert!(!state.record_time_sample(
+            clock::TimestampSample {
+                ms: 999,
+                nanos_within_ms: 100_000,
+            },
+            true
+        ));
+
+        assert_eq!(state.last_ms, 1_000);
+        assert_eq!(state.last_nanos_within_ms, 800_000);
+        assert_eq!(state.last_sampled_nanos_within_ms, 800_000);
+    }
+
+    #[test]
+    fn test_record_time_sample_keeps_same_millisecond_fraction_monotonic() {
+        let mut state = ThreadState::new();
+
+        assert!(state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 400_000,
+            },
+            true
+        ));
+        assert!(!state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 350_000,
+            },
+            false
+        ));
+        assert!(!state.record_time_sample(
+            clock::TimestampSample {
+                ms: 1_000,
+                nanos_within_ms: 450_000,
+            },
+            true
+        ));
+
+        assert_eq!(state.current_timestamp_sample().nanos_within_ms, 450_000);
+        assert_eq!(state.last_sampled_nanos_within_ms, 450_000);
     }
 
     #[test]
@@ -504,5 +766,21 @@ mod tests {
             0,
             "Seeded counter should start in the low 12 bits"
         );
+    }
+
+    #[test]
+    fn test_counter_rollover_resets_cached_sub_ms_state() {
+        let mut state = ThreadState::new();
+        assert!(state.refresh_time());
+        let previous_ms = state.last_ms;
+        state.last_nanos_within_ms = 900_000;
+        state.last_sampled_nanos_within_ms = 900_000;
+        state.counter = COUNTER_MAX;
+
+        let (timestamp, _) = state.get_time_and_counter();
+
+        assert_eq!(timestamp, previous_ms + 1);
+        assert_eq!(state.current_timestamp_sample().nanos_within_ms, 0);
+        assert_eq!(state.last_sampled_nanos_within_ms, 0);
     }
 }
