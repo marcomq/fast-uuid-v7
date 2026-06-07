@@ -87,6 +87,33 @@ fn uuid_hex_bytes(id: u128) -> [u8; 32] {
     *fast_uuid_v7::format_uuid_hex(id).as_bytes()
 }
 
+#[inline]
+fn py_ascii_string_from_bytes<'py>(py: Python<'py>, bytes: &[u8]) -> Bound<'py, PyString> {
+    debug_assert!(bytes.is_ascii());
+
+    #[cfg(not(any(Py_LIMITED_API, PyPy, GraalPy)))]
+    {
+        unsafe {
+            let ptr = pyo3::ffi::PyUnicode_New(bytes.len() as pyo3::ffi::Py_ssize_t, 127);
+            if !ptr.is_null() {
+                std::ptr::copy_nonoverlapping(
+                    bytes.as_ptr(),
+                    pyo3::ffi::PyUnicode_1BYTE_DATA(ptr),
+                    bytes.len(),
+                );
+            }
+            Bound::from_owned_ptr(py, ptr).cast_into_unchecked()
+        }
+    }
+
+    #[cfg(any(Py_LIMITED_API, PyPy, GraalPy))]
+    {
+        // SAFETY: UUID formatting emits only ASCII hex digits and dashes.
+        let text = unsafe { std::str::from_utf8_unchecked(bytes) };
+        PyString::new(py, text)
+    }
+}
+
 impl UUID {
     #[inline]
     fn new(id: u128) -> Self {
@@ -103,7 +130,7 @@ impl UUID {
 
     fn __str__<'py>(&self, py: Python<'py>) -> Bound<'py, PyString> {
         let formatted = fast_uuid_v7::format_uuid(self.id.get());
-        PyString::new(py, formatted.as_ref())
+        py_ascii_string_from_bytes(py, formatted.as_bytes())
     }
 
     fn __repr__(&self) -> String {
@@ -152,9 +179,7 @@ impl UUID {
     #[getter]
     fn hex<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
         let hex = uuid_hex_bytes(self.id.get());
-        let text = std::str::from_utf8(&hex)
-            .map_err(|_| PyValueError::new_err("UUID hex contained invalid UTF-8"))?;
-        Ok(PyString::new(py, text))
+        Ok(py_ascii_string_from_bytes(py, &hex))
     }
 
     #[getter]
@@ -232,7 +257,7 @@ fn gen_id_with_sub_ms_12() -> u128 {
 #[pyfunction]
 fn gen_id_str(py: Python<'_>) -> Bound<'_, PyString> {
     let uuid_str = fast_uuid_v7::gen_id_str();
-    PyString::new(py, uuid_str.as_ref())
+    py_ascii_string_from_bytes(py, uuid_str.as_bytes())
 }
 
 #[pyfunction]
@@ -254,7 +279,7 @@ fn uuid7_str(py: Python<'_>) -> Bound<'_, PyString> {
 #[pyfunction]
 fn uuid7_hex<'py>(py: Python<'py>) -> Bound<'py, PyString> {
     let uuid_hex = fast_uuid_v7::format_uuid_hex(fast_uuid_v7::gen_id());
-    PyString::new(py, uuid_hex.as_ref())
+    py_ascii_string_from_bytes(py, uuid_hex.as_bytes())
 }
 
 #[pyfunction]
@@ -262,7 +287,7 @@ fn format_uuid<'py>(py: Python<'py>, id: &Bound<'py, PyAny>) -> PyResult<Bound<'
     let id = parse_uuid_value(id)?;
 
     let formatted = fast_uuid_v7::format_uuid(id);
-    Ok(PyString::new(py, formatted.as_ref()))
+    Ok(py_ascii_string_from_bytes(py, formatted.as_bytes()))
 }
 
 #[pymodule]
