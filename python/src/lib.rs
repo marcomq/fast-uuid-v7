@@ -3,7 +3,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyString, PyTuple};
 use pyo3::ffi;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+use std::cell::RefCell;
 
 #[cfg_attr(
     any(Py_3_14, all(Py_3_10, not(Py_LIMITED_API))),
@@ -125,6 +126,21 @@ impl UUID {
     }
 }
 
+/// Per-thread cache of a single UUID Python object.
+///
+/// Uses `Py<UUID>` in a `RefCell` inside TLS. The `Py<UUID>` destructor
+/// decrefs the Python object when the TLS slot is reset or the thread exits.
+/// This is safe because thread exit normally happens while the interpreter
+/// (and the module) are still alive.
+///
+/// The cache avoids the PyObject allocator on the hot path: when the cached
+/// UUID has refcount 1 (cache is sole owner), we mutate its inner `u128` via
+/// `Cell::set` through PyO3's `Bound::borrow()` and return it.
+///
+/// Safety model:
+/// - `thread_local!` for per-thread isolation + no subinterpreter cross-talk.
+/// - GIL serializes all access.
+/// - Refcount check (==1) guarantees sole ownership before mutation.
 thread_local! {
     static UUID_CACHE: RefCell<Option<Py<UUID>>> = const { RefCell::new(None) };
 }
@@ -133,45 +149,29 @@ fn uuid7_with_cache(py: Python<'_>) -> Py<UUID> {
     uuid7_with_cache_id(py, fast_uuid_v7::gen_id())
 }
 
+#[inline(always)]
 fn uuid7_with_cache_id(py: Python<'_>, id: u128) -> Py<UUID> {
     UUID_CACHE.with(|cache| {
         let mut borrow = cache.borrow_mut();
         if let Some(cached) = borrow.as_ref() {
-            // Check if the cache is the sole owner (refcount == 1).
-            // SAFETY: We hold the GIL, so no concurrent refcount changes.
-            // The pointer is valid because we own a `Py<UUID>` in the cache.
+            // SAFETY: GIL held, pointer valid, no concurrent refcount changes.
             let reuse = unsafe {
                 let ptr = cached.as_ptr() as *mut pyo3::ffi::PyObject;
-                let refcnt = ffi::Py_REFCNT(ptr);
-                #[cfg(not(any(Py_LIMITED_API, PyPy, GraalPy)))]
-                {
-                    // refcnt == 1: cache is sole owner, safe to mutate.
-                    // Immortal objects (refcnt == IMMORTAL_SENTINEL) must NOT
-                    // be mutated in-place because we cannot distinguish "cache
-                    // is sole owner" from "many code paths share this object".
-                    refcnt == 1
-                }
-                #[cfg(any(Py_LIMITED_API, PyPy, GraalPy))]
-                {
-                    refcnt == 1
-                }
+                ffi::Py_REFCNT(ptr) == 1
             };
 
             if reuse {
-                // We own the only reference — mutate in-place.
-                // SAFETY: The pyclass is `frozen`, but `Cell::set` provides
-                // interior mutability via an immutable reference. We are
-                // allowed to mutate the Rust value through Cell.
+                // Sole owner — mutate in-place via PyO3's borrow API.
+                // SAFETY: refcount==1 confirms cache is the sole owner.
+                // Cell::set provides interior mutability through &self
+                // even though the pyclass is marked `frozen`.
                 let bound = cached.bind(py);
-                let uuid_ref = bound.borrow();
-                uuid_ref.id.set(id);
-                drop(uuid_ref);
+                bound.borrow().id.set(id);
                 return cached.clone_ref(py);
             }
         }
 
-        // Cache is empty, or the cached object is shared elsewhere.
-        // Allocate a fresh UUID and update the cache for next time.
+        // Cache empty or shared. Allocate fresh, cache it.
         let new = Py::new(py, UUID::new(id)).expect("failed to allocate fastuuidv7.UUID");
         *borrow = Some(new.clone_ref(py));
         new
