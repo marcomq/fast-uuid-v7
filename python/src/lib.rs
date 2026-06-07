@@ -2,11 +2,7 @@ use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyString, PyTuple};
-use std::cell::{Cell, RefCell};
-
-thread_local! {
-    static UUID_CACHE: RefCell<Option<Py<UUID>>> = const { RefCell::new(None) };
-}
+use std::cell::Cell;
 
 #[pyclass(
     module = "fastuuidv7",
@@ -169,7 +165,17 @@ impl UUID {
 
     #[getter]
     fn variant(&self) -> &'static str {
-        "specified in RFC 4122"
+        let clock_seq_hi = ((self.id.get() >> 56) & 0xff) as u8;
+
+        if clock_seq_hi & 0x80 == 0 {
+            "reserved for NCS compatibility"
+        } else if clock_seq_hi & 0xc0 == 0x80 {
+            "specified in RFC 4122"
+        } else if clock_seq_hi & 0xe0 == 0xc0 {
+            "reserved for Microsoft compatibility"
+        } else {
+            "reserved for future definition"
+        }
     }
 
     #[getter]
@@ -223,23 +229,7 @@ fn gen_id_bytes(py: Python<'_>) -> Bound<'_, PyBytes> {
 
 #[pyfunction]
 fn uuid7(py: Python<'_>) -> Py<UUID> {
-    let id = fast_uuid_v7::gen_id();
-
-    UUID_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-
-        if let Some(uuid) = cache.as_ref() {
-            let refcnt = unsafe { pyo3::ffi::Py_REFCNT(uuid.as_ptr()) };
-            if refcnt == 1 {
-                uuid.bind(py).borrow().id.set(id);
-                return uuid.clone_ref(py);
-            }
-        }
-
-        let uuid = Py::new(py, UUID::new(id)).expect("failed to allocate fastuuidv7.UUID");
-        *cache = Some(uuid.clone_ref(py));
-        uuid
-    })
+    Py::new(py, UUID::new(fast_uuid_v7::gen_id())).expect("failed to allocate fastuuidv7.UUID")
 }
 
 #[pyfunction]

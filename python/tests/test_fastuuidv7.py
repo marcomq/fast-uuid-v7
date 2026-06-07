@@ -57,6 +57,19 @@ class FastUuidV7Tests(unittest.TestCase):
         self.assertEqual(fastuuidv7.UUID(raw), fastuuidv7.UUID(text))
         self.assertEqual(fastuuidv7.format_uuid(fastuuidv7.UUID(raw)), text)
 
+    def test_uuid_variant_is_derived_from_clock_sequence_bits(self):
+        cases = (
+            (0x00, "reserved for NCS compatibility"),
+            (0x80, "specified in RFC 4122"),
+            (0xC0, "reserved for Microsoft compatibility"),
+            (0xE0, "reserved for future definition"),
+        )
+
+        for clock_seq_hi, expected in cases:
+            with self.subTest(clock_seq_hi=clock_seq_hi):
+                raw = clock_seq_hi << 56
+                self.assertEqual(fastuuidv7.UUID(raw).variant, expected)
+
     def test_uuid7_does_not_mutate_held_uuid(self):
         first = fastuuidv7.uuid7()
         first_int = first.int

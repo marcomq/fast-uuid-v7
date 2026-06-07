@@ -6,12 +6,22 @@
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use std::cell::RefCell;
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    not(target_feature = "ssse3")
+))]
+use std::sync::atomic::{AtomicU8, Ordering};
 
 const COUNTER_MAX: u32 = 0x3FFFF;
 const COUNTER_SEED_MASK: u32 = 0x0FFF;
 const HEX: &[u8; 16] = b"0123456789abcdef";
 #[cfg(not(target_arch = "aarch64"))]
 const HEX_PAIRS: [[u8; 2]; 256] = hex_pairs();
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    not(target_feature = "ssse3")
+))]
+static X86_FORMATTER: AtomicU8 = AtomicU8::new(0);
 
 #[cfg(not(target_arch = "aarch64"))]
 const fn hex_pairs() -> [[u8; 2]; 256] {
@@ -25,6 +35,23 @@ const fn hex_pairs() -> [[u8; 2]; 256] {
     }
 
     pairs
+}
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    not(target_feature = "ssse3")
+))]
+#[inline(always)]
+fn x86_has_ssse3() -> bool {
+    match X86_FORMATTER.load(Ordering::Relaxed) {
+        2 => true,
+        1 => false,
+        _ => {
+            let has_ssse3 = std::arch::is_x86_feature_detected!("ssse3");
+            X86_FORMATTER.store(if has_ssse3 { 2 } else { 1 }, Ordering::Relaxed);
+            has_ssse3
+        }
+    }
 }
 
 mod clock;
@@ -283,10 +310,22 @@ pub fn gen_id_str() -> UuidString {
 /// Formats a u128 UUID into a stack-allocated string representation.
 /// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 pub fn format_uuid(id: u128) -> UuidString {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "ssse3"
+    ))]
     {
-        if std::arch::is_x86_feature_detected!("ssse3") {
-            // SAFETY: The branch above verifies SSSE3 support before calling
+        // SAFETY: SSSE3 is enabled for this compilation unit.
+        return uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) });
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        not(target_feature = "ssse3")
+    ))]
+    {
+        if x86_has_ssse3() {
+            // SAFETY: x86_has_ssse3 verifies SSSE3 support before calling
             // the target-feature-specialized formatter.
             return uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) });
         }
@@ -311,10 +350,22 @@ pub fn format_uuid_hex(id: u128) -> UuidHex {
 }
 
 fn format_uuid_hex_bytes(id: u128) -> [u8; 32] {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "ssse3"
+    ))]
     {
-        if std::arch::is_x86_feature_detected!("ssse3") {
-            // SAFETY: The branch above verifies SSSE3 support before calling
+        // SAFETY: SSSE3 is enabled for this compilation unit.
+        return unsafe { format_uuid_hex_simd(id) };
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        not(target_feature = "ssse3")
+    ))]
+    {
+        if x86_has_ssse3() {
+            // SAFETY: x86_has_ssse3 verifies SSSE3 support before calling
             // the target-feature-specialized formatter.
             return unsafe { format_uuid_hex_simd(id) };
         }

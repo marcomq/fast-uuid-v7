@@ -71,9 +71,10 @@ Current results on macOS arm64 with Python 3.14.4:
 | `uuid` | `uuid.uuid7` | `1579.9 ns` |
 | [`fastuuid7`](https://github.com/nekrasovp/uuidv7) | `uuidv7.uuid7` | `298.6 ns` |
 | [`uuid-utils`](https://github.com/aminalaee/uuid-utils) | `uuid_utils.uuid7` | `96.8 ns` |
-| `fastuuidv7` | `fastuuidv7.uuid7_str` | `51.0 ns` |
+| [`c-uuid-v7`](https://github.com/lava-sh/c_uuid_v7) | `c_uuid_v7.uuid7` | `59.4 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7_str` | `24.5 ns` |
 
-The linux x86 GH runner has similar times. It is running always in this repo.
+The linux x86 GH runner shows similar times for `fastuuidv7` as for `c-uuid-v7`.
 
 Notes:
 
