@@ -4,12 +4,26 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyString, PyTuple};
 use std::cell::Cell;
 
-#[pyclass(
-    module = "fastuuidv7",
-    frozen,
-    freelist = 1024,
-    unsendable,
-    skip_from_py_object
+#[cfg_attr(
+    any(Py_3_14, all(Py_3_10, not(Py_LIMITED_API))),
+    pyclass(
+        module = "fastuuidv7",
+        frozen,
+        freelist = 1024,
+        immutable_type,
+        unsendable,
+        skip_from_py_object
+    )
+)]
+#[cfg_attr(
+    not(any(Py_3_14, all(Py_3_10, not(Py_LIMITED_API)))),
+    pyclass(
+        module = "fastuuidv7",
+        frozen,
+        freelist = 1024,
+        unsendable,
+        skip_from_py_object
+    )
 )]
 struct UUID {
     id: Cell<u128>,
