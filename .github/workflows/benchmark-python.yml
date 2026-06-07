@@ -68,6 +68,7 @@ jobs:
           pip install uuid7 || true
           pip install uuid-utils || true
           pip install fastuuid7 || true
+          pip install c-uuid-v7 || true
 
       - name: Display system information
         shell: bash
