@@ -316,7 +316,7 @@ pub fn format_uuid(id: u128) -> UuidString {
     ))]
     {
         // SAFETY: SSSE3 is enabled for this compilation unit.
-        return uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) });
+        return unsafe { format_uuid_simd(id) };
     }
 
     #[cfg(all(
@@ -327,7 +327,7 @@ pub fn format_uuid(id: u128) -> UuidString {
         if x86_has_ssse3() {
             // SAFETY: x86_has_ssse3 verifies SSSE3 support before calling
             // the target-feature-specialized formatter.
-            return uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) });
+            return unsafe { format_uuid_simd(id) };
         }
     }
 
@@ -384,6 +384,7 @@ fn format_uuid_hex_bytes(id: u128) -> [u8; 32] {
 }
 
 #[cfg(not(target_arch = "aarch64"))]
+#[inline(always)]
 fn format_uuid_scalar(id: u128) -> UuidString {
     let mut out = UuidString([0; 36]);
     let bytes = id.to_be_bytes();
@@ -457,6 +458,7 @@ fn format_uuid_scalar(id: u128) -> UuidString {
 }
 
 #[cfg(not(target_arch = "aarch64"))]
+#[inline(always)]
 fn format_uuid_hex_scalar(id: u128) -> [u8; 32] {
     let bytes = id.to_be_bytes();
     let mut out = [0u8; 32];
@@ -471,6 +473,14 @@ fn format_uuid_hex_scalar(id: u128) -> [u8; 32] {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline(always)]
+#[target_feature(enable = "ssse3")]
+unsafe fn format_uuid_simd(id: u128) -> UuidString {
+    uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) })
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[inline(always)]
 #[target_feature(enable = "ssse3")]
 unsafe fn format_uuid_hex_simd(id: u128) -> [u8; 32] {
     #[cfg(target_arch = "x86")]
@@ -508,6 +518,7 @@ unsafe fn format_uuid_hex_simd(id: u128) -> [u8; 32] {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[inline(always)]
 unsafe fn format_uuid_hex_neon(id: u128) -> [u8; 32] {
     use std::arch::aarch64::{
         uint8x16_t, vandq_u8, vdupq_n_u8, vld1q_u8, vqtbl1q_u8, vshrq_n_u8, vst1q_u8, vzip1q_u8,
@@ -538,7 +549,7 @@ unsafe fn format_uuid_hex_neon(id: u128) -> [u8; 32] {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
-#[inline]
+#[inline(always)]
 fn uuid_string_from_hex(hex: [u8; 32]) -> UuidString {
     let mut out = UuidString([0; 36]);
 
