@@ -58,24 +58,17 @@ def resolve_benchmarks():
     benchmarks = []
     seen = set()
 
-    for label, required_distribution, module_candidates in [
-        ("fastuuidv7", None, [("fastuuidv7", ["uuid7", "gen_id_str"])]),
-    ]:
-        candidate = resolve_optional_benchmark(
-            label,
-            module_candidates,
-            required_distribution=required_distribution,
-        )
-        if candidate is None:
-            skipped.append(label)
-            continue
+    local = optional_module("fastuuidv7")
+    if local is None:
+        skipped.append("fastuuidv7")
+    else:
+        for attribute_name in ("uuid7", "uuid7_str", "uuid7_hex", "gen_id_str"):
+            fn = getattr(local, attribute_name, None)
+            name = f"fastuuidv7.{attribute_name}"
+            if callable(fn) and name not in seen:
+                seen.add(name)
+                benchmarks.append((name, fn))
 
-        name, fn = candidate
-        if name in seen:
-            continue
-
-        seen.add(name)
-        benchmarks.append((name, fn))
     return benchmarks, skipped
 
 

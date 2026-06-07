@@ -35,6 +35,47 @@ class FastUuidV7Tests(unittest.TestCase):
         parsed = uuid.UUID(fastuuidv7.format_uuid(fastuuidv7.gen_id()))
         self.assertEqual(parsed.version, 7)
 
+    def test_uuid7_returns_uuid_compatible_object(self):
+        generated = fastuuidv7.uuid7()
+
+        self.assertIsInstance(generated, fastuuidv7.UUID)
+        parsed = uuid.UUID(str(generated))
+        self.assertEqual(parsed.version, 7)
+        self.assertEqual(generated.int, parsed.int)
+        self.assertEqual(int(generated), parsed.int)
+        self.assertEqual(generated.bytes, parsed.bytes)
+        self.assertEqual(generated.hex, parsed.hex)
+        self.assertEqual(generated.urn, parsed.urn)
+        self.assertEqual(generated.fields, parsed.fields)
+        self.assertEqual(generated.version, 7)
+        self.assertEqual(generated.timestamp, generated.time)
+
+    def test_uuid_object_constructs_from_supported_values(self):
+        raw = fastuuidv7.gen_id()
+        text = fastuuidv7.format_uuid(raw)
+
+        self.assertEqual(fastuuidv7.UUID(raw), fastuuidv7.UUID(text))
+        self.assertEqual(fastuuidv7.format_uuid(fastuuidv7.UUID(raw)), text)
+
+    def test_uuid7_does_not_mutate_held_uuid(self):
+        first = fastuuidv7.uuid7()
+        first_int = first.int
+        second = fastuuidv7.uuid7()
+
+        self.assertIsNot(first, second)
+        self.assertEqual(first.int, first_int)
+        self.assertNotEqual(first.int, second.int)
+
+    def test_uuid7_str_preserves_string_alias(self):
+        self.assertIsInstance(fastuuidv7.uuid7_str(), str)
+
+    def test_uuid7_hex_is_undashed_uuid_hex(self):
+        raw = fastuuidv7.uuid7_hex()
+        self.assertIsInstance(raw, str)
+        self.assertEqual(len(raw), 32)
+        parsed = uuid.UUID(hex=raw)
+        self.assertEqual(parsed.version, 7)
+
     def test_format_uuid_rejects_invalid_input(self):
         for value in ("not-an-int", -1, 1 << 128):
             with self.subTest(value=value):

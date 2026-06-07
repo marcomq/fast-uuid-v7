@@ -37,14 +37,18 @@ raw_sub_ms_8 = fastuuidv7.gen_id_with_sub_ms_8()
 raw_sub_ms_12 = fastuuidv7.gen_id_with_sub_ms_12()
 text = fastuuidv7.gen_id_str()
 data = fastuuidv7.gen_id_bytes()
+uuid_obj = fastuuidv7.uuid7()
 
 same_text = fastuuidv7.format_uuid(raw)
+same_text_from_obj = fastuuidv7.format_uuid(uuid_obj)
 ```
 
 Convenience aliases:
 
 ```python
-fastuuidv7.uuid7()
+fastuuidv7.uuid7()      # fastuuidv7.UUID object
+fastuuidv7.uuid7_str()  # str
+fastuuidv7.uuid7_hex()  # str without dashes
 fastuuidv7.uuid7_bytes()
 ```
 
@@ -67,7 +71,7 @@ Current results on macOS arm64 with Python 3.14.4:
 | `uuid` | `uuid.uuid7` | `1579.9 ns` |
 | [`fastuuid7`](https://github.com/nekrasovp/uuidv7) | `uuidv7.uuid7` | `298.6 ns` |
 | [`uuid-utils`](https://github.com/aminalaee/uuid-utils) | `uuid_utils.uuid7` | `96.8 ns` |
-| `fastuuidv7` | `fastuuidv7.uuid7` | `51.0 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7_str` | `51.0 ns` |
 
 The linux x86 GH runner has similar times. It is running always in this repo.
 
