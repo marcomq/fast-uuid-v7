@@ -12,7 +12,6 @@ thread_local! {
     module = "fastuuidv7",
     frozen,
     freelist = 1024,
-    immutable_type,
     unsendable,
     skip_from_py_object
 )]
@@ -223,7 +222,7 @@ fn gen_id_bytes(py: Python<'_>) -> Bound<'_, PyBytes> {
 }
 
 #[pyfunction]
-fn uuid7(py: Python<'_>) -> PyResult<Py<UUID>> {
+fn uuid7(py: Python<'_>) -> Py<UUID> {
     let id = fast_uuid_v7::gen_id();
 
     UUID_CACHE.with(|cache| {
@@ -233,13 +232,13 @@ fn uuid7(py: Python<'_>) -> PyResult<Py<UUID>> {
             let refcnt = unsafe { pyo3::ffi::Py_REFCNT(uuid.as_ptr()) };
             if refcnt == 1 {
                 uuid.bind(py).borrow().id.set(id);
-                return Ok(uuid.clone_ref(py));
+                return uuid.clone_ref(py);
             }
         }
 
-        let uuid = Py::new(py, UUID::new(id))?;
+        let uuid = Py::new(py, UUID::new(id)).expect("failed to allocate fastuuidv7.UUID");
         *cache = Some(uuid.clone_ref(py));
-        Ok(uuid)
+        uuid
     })
 }
 
