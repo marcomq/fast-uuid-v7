@@ -473,14 +473,12 @@ fn format_uuid_hex_scalar(id: u128) -> [u8; 32] {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[inline(always)]
 #[target_feature(enable = "ssse3")]
 unsafe fn format_uuid_simd(id: u128) -> UuidString {
     uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) })
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[inline(always)]
 #[target_feature(enable = "ssse3")]
 unsafe fn format_uuid_hex_simd(id: u128) -> [u8; 32] {
     #[cfg(target_arch = "x86")]
