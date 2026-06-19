@@ -50,13 +50,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: release
     environment: release
+    permissions:
+      # Required for crates.io Trusted Publishing (OIDC).
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      
+
+      # Exchange the GitHub OIDC token for a short-lived crates.io token.
+      - name: Authenticate to crates.io (Trusted Publishing)
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       - name: Publish to crates.io
         run: cargo publish --allow-dirty
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
