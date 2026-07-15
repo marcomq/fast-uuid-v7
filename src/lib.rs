@@ -6,9 +6,53 @@
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use std::cell::RefCell;
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    not(target_feature = "ssse3")
+))]
+use std::sync::atomic::{AtomicU8, Ordering};
 
 const COUNTER_MAX: u32 = 0x3FFFF;
 const COUNTER_SEED_MASK: u32 = 0x0FFF;
+const HEX: &[u8; 16] = b"0123456789abcdef";
+#[cfg(not(target_arch = "aarch64"))]
+const HEX_PAIRS: [[u8; 2]; 256] = hex_pairs();
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    not(target_feature = "ssse3")
+))]
+static X86_FORMATTER: AtomicU8 = AtomicU8::new(0);
+
+#[cfg(not(target_arch = "aarch64"))]
+const fn hex_pairs() -> [[u8; 2]; 256] {
+    let mut pairs = [[0u8; 2]; 256];
+    let mut i = 0;
+
+    while i < 256 {
+        pairs[i][0] = HEX[i >> 4];
+        pairs[i][1] = HEX[i & 0x0f];
+        i += 1;
+    }
+
+    pairs
+}
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    not(target_feature = "ssse3")
+))]
+#[inline(always)]
+fn x86_has_ssse3() -> bool {
+    match X86_FORMATTER.load(Ordering::Relaxed) {
+        2 => true,
+        1 => false,
+        _ => {
+            let has_ssse3 = std::arch::is_x86_feature_detected!("ssse3");
+            X86_FORMATTER.store(if has_ssse3 { 2 } else { 1 }, Ordering::Relaxed);
+            has_ssse3
+        }
+    }
+}
 
 mod clock;
 
@@ -266,59 +310,257 @@ pub fn gen_id_str() -> UuidString {
 /// Formats a u128 UUID into a stack-allocated string representation.
 /// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 pub fn format_uuid(id: u128) -> UuidString {
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "ssse3"
+    ))]
+    {
+        // SAFETY: SSSE3 is enabled for this compilation unit.
+        return unsafe { format_uuid_simd(id) };
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        not(target_feature = "ssse3")
+    ))]
+    {
+        if x86_has_ssse3() {
+            // SAFETY: x86_has_ssse3 verifies SSSE3 support before calling
+            // the target-feature-specialized formatter.
+            return unsafe { format_uuid_simd(id) };
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON/AdvSIMD is part of the aarch64 baseline.
+        uuid_string_from_hex(unsafe { format_uuid_hex_neon(id) })
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        format_uuid_scalar(id)
+    }
+}
+
+/// Formats a u128 UUID into a stack-allocated lowercase hex representation.
+/// `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+pub fn format_uuid_hex(id: u128) -> UuidHex {
+    UuidHex(format_uuid_hex_bytes(id))
+}
+
+fn format_uuid_hex_bytes(id: u128) -> [u8; 32] {
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "ssse3"
+    ))]
+    {
+        // SAFETY: SSSE3 is enabled for this compilation unit.
+        return unsafe { format_uuid_hex_simd(id) };
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        not(target_feature = "ssse3")
+    ))]
+    {
+        if x86_has_ssse3() {
+            // SAFETY: x86_has_ssse3 verifies SSSE3 support before calling
+            // the target-feature-specialized formatter.
+            return unsafe { format_uuid_hex_simd(id) };
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON/AdvSIMD is part of the aarch64 baseline.
+        unsafe { format_uuid_hex_neon(id) }
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        format_uuid_hex_scalar(id)
+    }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+#[inline(always)]
+fn format_uuid_scalar(id: u128) -> UuidString {
     let mut out = UuidString([0; 36]);
     let bytes = id.to_be_bytes();
-    const HEX: &[u8; 16] = b"0123456789abcdef";
 
     unsafe {
         let ptr = out.0.as_mut_ptr();
 
         // Group 1: 8 chars (4 bytes)
-        *ptr.add(0) = HEX[(bytes[0] >> 4) as usize];
-        *ptr.add(1) = HEX[(bytes[0] & 0xf) as usize];
-        *ptr.add(2) = HEX[(bytes[1] >> 4) as usize];
-        *ptr.add(3) = HEX[(bytes[1] & 0xf) as usize];
-        *ptr.add(4) = HEX[(bytes[2] >> 4) as usize];
-        *ptr.add(5) = HEX[(bytes[2] & 0xf) as usize];
-        *ptr.add(6) = HEX[(bytes[3] >> 4) as usize];
-        *ptr.add(7) = HEX[(bytes[3] & 0xf) as usize];
+        let pair = HEX_PAIRS[bytes[0] as usize];
+        *ptr.add(0) = pair[0];
+        *ptr.add(1) = pair[1];
+        let pair = HEX_PAIRS[bytes[1] as usize];
+        *ptr.add(2) = pair[0];
+        *ptr.add(3) = pair[1];
+        let pair = HEX_PAIRS[bytes[2] as usize];
+        *ptr.add(4) = pair[0];
+        *ptr.add(5) = pair[1];
+        let pair = HEX_PAIRS[bytes[3] as usize];
+        *ptr.add(6) = pair[0];
+        *ptr.add(7) = pair[1];
         *ptr.add(8) = b'-';
 
         // Group 2: 4 chars (2 bytes)
-        *ptr.add(9) = HEX[(bytes[4] >> 4) as usize];
-        *ptr.add(10) = HEX[(bytes[4] & 0xf) as usize];
-        *ptr.add(11) = HEX[(bytes[5] >> 4) as usize];
-        *ptr.add(12) = HEX[(bytes[5] & 0xf) as usize];
+        let pair = HEX_PAIRS[bytes[4] as usize];
+        *ptr.add(9) = pair[0];
+        *ptr.add(10) = pair[1];
+        let pair = HEX_PAIRS[bytes[5] as usize];
+        *ptr.add(11) = pair[0];
+        *ptr.add(12) = pair[1];
         *ptr.add(13) = b'-';
 
         // Group 3: 4 chars (2 bytes)
-        *ptr.add(14) = HEX[(bytes[6] >> 4) as usize];
-        *ptr.add(15) = HEX[(bytes[6] & 0xf) as usize];
-        *ptr.add(16) = HEX[(bytes[7] >> 4) as usize];
-        *ptr.add(17) = HEX[(bytes[7] & 0xf) as usize];
+        let pair = HEX_PAIRS[bytes[6] as usize];
+        *ptr.add(14) = pair[0];
+        *ptr.add(15) = pair[1];
+        let pair = HEX_PAIRS[bytes[7] as usize];
+        *ptr.add(16) = pair[0];
+        *ptr.add(17) = pair[1];
         *ptr.add(18) = b'-';
 
         // Group 4: 4 chars (2 bytes)
-        *ptr.add(19) = HEX[(bytes[8] >> 4) as usize];
-        *ptr.add(20) = HEX[(bytes[8] & 0xf) as usize];
-        *ptr.add(21) = HEX[(bytes[9] >> 4) as usize];
-        *ptr.add(22) = HEX[(bytes[9] & 0xf) as usize];
+        let pair = HEX_PAIRS[bytes[8] as usize];
+        *ptr.add(19) = pair[0];
+        *ptr.add(20) = pair[1];
+        let pair = HEX_PAIRS[bytes[9] as usize];
+        *ptr.add(21) = pair[0];
+        *ptr.add(22) = pair[1];
         *ptr.add(23) = b'-';
 
         // Group 5: 12 chars (6 bytes)
-        *ptr.add(24) = HEX[(bytes[10] >> 4) as usize];
-        *ptr.add(25) = HEX[(bytes[10] & 0xf) as usize];
-        *ptr.add(26) = HEX[(bytes[11] >> 4) as usize];
-        *ptr.add(27) = HEX[(bytes[11] & 0xf) as usize];
-        *ptr.add(28) = HEX[(bytes[12] >> 4) as usize];
-        *ptr.add(29) = HEX[(bytes[12] & 0xf) as usize];
-        *ptr.add(30) = HEX[(bytes[13] >> 4) as usize];
-        *ptr.add(31) = HEX[(bytes[13] & 0xf) as usize];
-        *ptr.add(32) = HEX[(bytes[14] >> 4) as usize];
-        *ptr.add(33) = HEX[(bytes[14] & 0xf) as usize];
-        *ptr.add(34) = HEX[(bytes[15] >> 4) as usize];
-        *ptr.add(35) = HEX[(bytes[15] & 0xf) as usize];
+        let pair = HEX_PAIRS[bytes[10] as usize];
+        *ptr.add(24) = pair[0];
+        *ptr.add(25) = pair[1];
+        let pair = HEX_PAIRS[bytes[11] as usize];
+        *ptr.add(26) = pair[0];
+        *ptr.add(27) = pair[1];
+        let pair = HEX_PAIRS[bytes[12] as usize];
+        *ptr.add(28) = pair[0];
+        *ptr.add(29) = pair[1];
+        let pair = HEX_PAIRS[bytes[13] as usize];
+        *ptr.add(30) = pair[0];
+        *ptr.add(31) = pair[1];
+        let pair = HEX_PAIRS[bytes[14] as usize];
+        *ptr.add(32) = pair[0];
+        *ptr.add(33) = pair[1];
+        let pair = HEX_PAIRS[bytes[15] as usize];
+        *ptr.add(34) = pair[0];
+        *ptr.add(35) = pair[1];
     }
+    out
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+#[inline(always)]
+fn format_uuid_hex_scalar(id: u128) -> [u8; 32] {
+    let bytes = id.to_be_bytes();
+    let mut out = [0u8; 32];
+
+    for (idx, byte) in bytes.iter().enumerate() {
+        let pair = HEX_PAIRS[*byte as usize];
+        out[idx * 2] = pair[0];
+        out[idx * 2 + 1] = pair[1];
+    }
+
+    out
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "ssse3")]
+unsafe fn format_uuid_simd(id: u128) -> UuidString {
+    uuid_string_from_hex(unsafe { format_uuid_hex_simd(id) })
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "ssse3")]
+unsafe fn format_uuid_hex_simd(id: u128) -> [u8; 32] {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::{
+        __m128i, _mm_and_si128, _mm_loadu_si128, _mm_set1_epi8, _mm_shuffle_epi8, _mm_srli_epi16,
+        _mm_storeu_si128, _mm_unpackhi_epi8, _mm_unpacklo_epi8,
+    };
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::{
+        __m128i, _mm_and_si128, _mm_loadu_si128, _mm_set1_epi8, _mm_shuffle_epi8, _mm_srli_epi16,
+        _mm_storeu_si128, _mm_unpackhi_epi8, _mm_unpacklo_epi8,
+    };
+
+    let bytes = id.to_be_bytes();
+    let mut hex = [0u8; 32];
+
+    unsafe {
+        let raw = _mm_loadu_si128(bytes.as_ptr() as *const __m128i);
+        let mask = _mm_set1_epi8(0x0f);
+        let table = _mm_loadu_si128(HEX.as_ptr() as *const __m128i);
+
+        let lo = _mm_and_si128(raw, mask);
+        let hi = _mm_and_si128(_mm_srli_epi16(raw, 4), mask);
+        let nibbles_lo = _mm_unpacklo_epi8(hi, lo);
+        let nibbles_hi = _mm_unpackhi_epi8(hi, lo);
+
+        let hex_lo = _mm_shuffle_epi8(table, nibbles_lo);
+        let hex_hi = _mm_shuffle_epi8(table, nibbles_hi);
+
+        _mm_storeu_si128(hex.as_mut_ptr() as *mut __m128i, hex_lo);
+        _mm_storeu_si128(hex.as_mut_ptr().add(16) as *mut __m128i, hex_hi);
+    }
+
+    hex
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+unsafe fn format_uuid_hex_neon(id: u128) -> [u8; 32] {
+    use std::arch::aarch64::{
+        uint8x16_t, vandq_u8, vdupq_n_u8, vld1q_u8, vqtbl1q_u8, vshrq_n_u8, vst1q_u8, vzip1q_u8,
+        vzip2q_u8,
+    };
+
+    let bytes = id.to_be_bytes();
+    let mut hex = [0u8; 32];
+
+    unsafe {
+        let raw = vld1q_u8(bytes.as_ptr());
+        let table = vld1q_u8(HEX.as_ptr());
+        let mask = vdupq_n_u8(0x0f);
+
+        let lo = vandq_u8(raw, mask);
+        let hi = vshrq_n_u8::<4>(raw);
+        let nibbles_lo: uint8x16_t = vzip1q_u8(hi, lo);
+        let nibbles_hi: uint8x16_t = vzip2q_u8(hi, lo);
+
+        let hex_lo = vqtbl1q_u8(table, nibbles_lo);
+        let hex_hi = vqtbl1q_u8(table, nibbles_hi);
+
+        vst1q_u8(hex.as_mut_ptr(), hex_lo);
+        vst1q_u8(hex.as_mut_ptr().add(16), hex_hi);
+    }
+
+    hex
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+#[inline(always)]
+fn uuid_string_from_hex(hex: [u8; 32]) -> UuidString {
+    let mut out = UuidString([0; 36]);
+
+    out.0[0..8].copy_from_slice(&hex[0..8]);
+    out.0[8] = b'-';
+    out.0[9..13].copy_from_slice(&hex[8..12]);
+    out.0[13] = b'-';
+    out.0[14..18].copy_from_slice(&hex[12..16]);
+    out.0[18] = b'-';
+    out.0[19..23].copy_from_slice(&hex[16..20]);
+    out.0[23] = b'-';
+    out.0[24..36].copy_from_slice(&hex[20..32]);
+
     out
 }
 
@@ -330,12 +572,22 @@ pub fn format_uuid(id: u128) -> UuidString {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UuidString([u8; 36]);
 
+/// A stack-allocated hex representation of a UUID without dashes (32 bytes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UuidHex([u8; 32]);
+
 impl UuidString {
     /// Returns this UUID as a string slice.
     #[inline]
     pub fn as_str(&self) -> &str {
         // SAFETY: The buffer is always filled with valid ASCII (hex + dashes).
         unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+
+    /// Returns the underlying UUID string bytes.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8; 36] {
+        &self.0
     }
 }
 
@@ -370,6 +622,44 @@ impl PartialEq<&str> for UuidString {
 }
 
 impl std::fmt::Display for UuidString {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl UuidHex {
+    /// Returns this UUID as a lowercase hex string slice without dashes.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // SAFETY: The buffer is always filled with valid ASCII hex.
+        unsafe { std::str::from_utf8_unchecked(&self.0) }
+    }
+
+    /// Returns the underlying UUID hex bytes.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for UuidHex {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for UuidHex {
+    #[inline]
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Display for UuidHex {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -498,6 +788,14 @@ mod tests {
         let id = gen_id_u128();
         let formatted = format_uuid(id);
         let uuid_crate_str = uuid::Uuid::from_u128(id).to_string();
+        assert_eq!(formatted.as_ref(), uuid_crate_str);
+    }
+
+    #[test]
+    fn test_format_uuid_hex_correctness() {
+        let id = gen_id_u128();
+        let formatted = format_uuid_hex(id);
+        let uuid_crate_str = uuid::Uuid::from_u128(id).simple().to_string();
         assert_eq!(formatted.as_ref(), uuid_crate_str);
     }
 

@@ -34,3 +34,8 @@ Issues = "https://github.com/marcomq/fast-uuid-v7/issues"
 [tool.maturin]
 bindings = "pyo3"
 module-name = "fastuuidv7"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]

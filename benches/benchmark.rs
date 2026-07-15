@@ -1,8 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use fast_uuid_v7::{
-    gen_id_str, gen_id_string, gen_id_u128, gen_id_with_count, gen_id_with_count_str,
-    gen_id_with_sub_ms_8,
+    format_uuid, format_uuid_hex, gen_id_str, gen_id_string, gen_id_u128, gen_id_with_count,
+    gen_id_with_count_str, gen_id_with_sub_ms_8,
 };
+use std::hint::black_box;
 use uuid::Uuid;
 
 fn benchmark_gen_id_u128(c: &mut Criterion) {
@@ -15,6 +16,18 @@ fn benchmark_gen_id_string(c: &mut Criterion) {
 
 fn benchmark_gen_id_str(c: &mut Criterion) {
     c.bench_function("gen_id_str", |b| b.iter(|| gen_id_str()));
+}
+
+fn benchmark_format_uuid(c: &mut Criterion) {
+    c.bench_function("format_uuid", |b| {
+        b.iter(|| format_uuid(black_box(0x019e_9bb4_c7c3_77a4_8a83_d613_6b3e_4cebu128)))
+    });
+}
+
+fn benchmark_format_uuid_hex(c: &mut Criterion) {
+    c.bench_function("format_uuid_hex", |b| {
+        b.iter(|| format_uuid_hex(black_box(0x019e_9bb4_c7c3_77a4_8a83_d613_6b3e_4cebu128)))
+    });
 }
 
 fn benchmark_gen_id_with_count(c: &mut Criterion) {
@@ -46,6 +59,8 @@ criterion_group!(
     benchmark_gen_id_u128,
     benchmark_gen_id_string,
     benchmark_gen_id_str,
+    benchmark_format_uuid,
+    benchmark_format_uuid_hex,
     benchmark_gen_id_with_count,
     benchmark_gen_id_with_count_str,
     benchmark_gen_id_with_sub_ms_8,

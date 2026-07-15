@@ -64,6 +64,7 @@ def resolve_benchmarks():
         ("uuid7", "uuid7", [("uuid7", ["uuid7"]), ("uuid_extensions", ["uuid7", "uuid7str"])]),
         ("uuid-utils", "uuid-utils", [("uuid_utils", ["uuid7"])]),
         ("uuidv7", "uuidv7", [("uuidv7", ["uuid7", "uuidv7", "generate"])]),
+        ("c-uuid-v7", "c-uuid-v7", [("c_uuid_v7", ["uuid7"])]),
         (
             "fastuuid7",
             "fastuuid7",
@@ -72,7 +73,6 @@ def resolve_benchmarks():
                 ("uuidv7", ["uuid7", "uuidv7", "generate"]),
             ],
         ),
-        ("fastuuidv7", None, [("fastuuidv7", ["uuid7", "gen_id_str"])]),
     ]:
         candidate = resolve_optional_benchmark(
             label,
@@ -89,6 +89,17 @@ def resolve_benchmarks():
 
         seen.add(name)
         benchmarks.append((name, fn))
+
+    local = optional_module("fastuuidv7")
+    if local is None:
+        skipped.append("fastuuidv7")
+    else:
+        for attribute_name in ("uuid7", "uuid7_str", "uuid7_hex", "gen_id_str"):
+            fn = getattr(local, attribute_name, None)
+            name = f"fastuuidv7.{attribute_name}"
+            if callable(fn) and name not in seen:
+                seen.add(name)
+                benchmarks.append((name, fn))
 
     if hasattr(uuid, "uuid7"):
         if "uuid.uuid7" not in seen:
