@@ -28,13 +28,17 @@ jobs:
             os: linux
             target: x86_64
           # Linux aarch64 (ARM64)
+          # mimalloc disabled: its C build fails on the old cross-compile GCC
           - runner: ubuntu-latest
             os: linux
             target: aarch64
+            maturin_args: --no-default-features
           # Linux armv7
+          # mimalloc disabled: its C build fails on the old cross-compile GCC
           - runner: ubuntu-latest
             os: linux
             target: armv7
+            maturin_args: --no-default-features
           # macOS x86_64 (Intel)
           - runner: macos-15-intel
             os: macos
@@ -70,7 +74,7 @@ jobs:
         with:
           working-directory: python
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist --find-interpreter ${{ matrix.platform.maturin_args }}
           sccache: 'true'
           manylinux: auto
 
