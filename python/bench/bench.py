@@ -6,6 +6,7 @@ import timeit
 import uuid
 
 CALLS = 500_000
+REPEAT = 3
 
 PACKAGE_VERSIONS = [
     ("uuid6", "uuid6"),
@@ -123,7 +124,8 @@ def resolve_benchmarks():
 
 
 def benchmark(name, fn):
-    elapsed = timeit.timeit(fn, number=CALLS)
+    # Take the fastest of REPEAT runs to reject scheduler/VM noise.
+    elapsed = min(timeit.repeat(fn, number=CALLS, repeat=REPEAT))
     ops_per_sec = CALLS / elapsed
     ns_per_call = elapsed * 1e9 / CALLS
     print(f"{name:24} {ops_per_sec:12.0f} ops/s  {ns_per_call:10.1f} ns/call")

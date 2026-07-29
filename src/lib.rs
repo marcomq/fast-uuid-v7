@@ -5,7 +5,7 @@
 
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 #[cfg(all(
     any(target_arch = "x86", target_arch = "x86_64"),
     not(target_feature = "ssse3")
@@ -167,7 +167,25 @@ impl ThreadState {
 }
 
 thread_local! {
-    static STATE: RefCell<ThreadState> = RefCell::new(ThreadState::new());
+    static STATE: UnsafeCell<ThreadState> = UnsafeCell::new(ThreadState::new());
+}
+
+/// Runs `f` with exclusive access to the thread-local [`ThreadState`].
+///
+/// # Safety invariant
+/// This hands out a `&mut ThreadState` from an `UnsafeCell` without a runtime
+/// borrow flag. That is sound only because the state is thread-local (no other
+/// thread can reach it) and `f` never re-enters `with_state` — none of the ID
+/// generators call back into the thread-local while holding the reference, so
+/// the `&mut` is never aliased.
+#[inline(always)]
+fn with_state<R>(f: impl FnOnce(&mut ThreadState) -> R) -> R {
+    STATE.with(|state_cell| {
+        // SAFETY: see the invariant above; access is single-threaded and
+        // non-reentrant, so this is the only live reference to the state.
+        let state = unsafe { &mut *state_cell.get() };
+        f(state)
+    })
 }
 
 #[inline]
@@ -214,8 +232,7 @@ fn uuid_v7_from_parts(timestamp_ms: u64, rand_a: u16, rand_b: u64) -> u128 {
 /// fast-uuid-v7 is is not random enough for cryptography!
 #[inline]
 pub fn gen_id_u128() -> u128 {
-    STATE.with(|state_cell| {
-        let mut state = state_cell.borrow_mut();
+    with_state(|state| {
         let timestamp = state.get_time();
 
         // We need 74 bits of randomness. SmallRng generates 64 bits per call.
@@ -252,8 +269,7 @@ pub fn gen_id() -> u128 {
 fn gen_id_with_sub_ms_bits(bits: u8) -> u128 {
     debug_assert!(matches!(bits, 4 | 8 | 12));
 
-    STATE.with(|state_cell| {
-        let mut state = state_cell.borrow_mut();
+    with_state(|state| {
         let sample = state.sample_time();
 
         let r1 = state.rng.next_u32();
@@ -672,8 +688,7 @@ impl std::fmt::Display for UuidHex {
 /// collision risk across different nodes if the random part is exhausted.
 #[inline]
 pub fn gen_id_with_count() -> u128 {
-    STATE.with(|state_cell| {
-        let mut state = state_cell.borrow_mut();
+    with_state(|state| {
         let (timestamp, counter) = state.get_time_and_counter();
 
         // Use 18 bits for counter: 12 in rand_a, 6 in rand_b high.
