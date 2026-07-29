@@ -142,9 +142,14 @@ impl UUID {
 // `Cell::set` through PyO3's `Bound::borrow()` and return it.
 //
 // Safety model:
-// - `thread_local!` for per-thread isolation + no subinterpreter cross-talk.
-// - GIL serializes all access.
+// - GIL serializes all access to the cache.
 // - Refcount check (==1) guarantees sole ownership before mutation.
+// - `thread_local!` is per-OS-thread, not per-interpreter, so it does NOT by
+//   itself isolate subinterpreters that share a thread. We rely instead on
+//   PyO3 0.29's default of rejecting import into a subinterpreter with its own
+//   GIL; without that rejection a `Py<UUID>` cached under one interpreter could
+//   be handed to another. If per-interpreter GIL support is ever enabled, this
+//   cache must move to interpreter-keyed state cleaned up before finalization.
 thread_local! {
     static UUID_CACHE: RefCell<Option<Py<UUID>>> = const { RefCell::new(None) };
 }

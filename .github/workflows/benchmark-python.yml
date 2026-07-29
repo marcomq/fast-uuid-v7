@@ -67,6 +67,7 @@ jobs:
           pip install uuid6 || true
           pip install uuid7 || true
           pip install uuid-v7 || true
+          pip install uuidv7 || true
           pip install uuid-utils || true
           pip install fastuuid7 || true
           pip install c-uuid-v7 || true
