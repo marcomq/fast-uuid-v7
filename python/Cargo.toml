@@ -11,7 +11,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 fast-uuid-v7 = { path = ".." }
-pyo3 = { version = "0.28.3", features = ["extension-module"] }
+mimalloc = { version = "0.1", default-features = false }
+pyo3 = { version = "0.29.0", features = ["extension-module"] }
 
 [build-dependencies]
-pyo3-build-config = "0.28.3"
+pyo3-build-config = "0.29.0"

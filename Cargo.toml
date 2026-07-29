@@ -15,7 +15,7 @@ repository = "https://github.com/marcomq/fast-uuid-v7"
 license.workspace = true
 
 [dependencies]
-rand = "0.9"
+rand = "0.10"
 
 [[bench]]
 name = "benchmark"

@@ -4,7 +4,7 @@
 //  git clone https://github.com/marcomq/fast-uuid-v7
 
 use rand::rngs::SmallRng;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use std::cell::RefCell;
 #[cfg(all(
     any(target_arch = "x86", target_arch = "x86_64"),

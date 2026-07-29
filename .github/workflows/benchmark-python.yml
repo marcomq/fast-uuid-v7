@@ -66,6 +66,7 @@ jobs:
         run: |
           pip install uuid6 || true
           pip install uuid7 || true
+          pip install uuid-v7 || true
           pip install uuid-utils || true
           pip install fastuuid7 || true
           pip install c-uuid-v7 || true
@@ -78,6 +79,32 @@ jobs:
           python -c "import platform; print(f'Platform: {platform.platform()}')"
           python -c "import platform; print(f'Processor: {platform.processor()}')"
           python -c "import platform; print(f'Machine: {platform.machine()}')"
+          echo ""
+
+      - name: Display benchmark package versions
+        shell: bash
+        run: |
+          echo "=== Benchmark Package Versions ==="
+          python - <<'PY'
+          import importlib.metadata as md
+
+          packages = [
+              ("uuid6", "uuid6"),
+              ("uuid-v7", "uuid-v7"),
+              ("uuid7", "uuid7"),
+              ("uuid-utils", "uuid-utils"),
+              ("uuidv7", "uuidv7"),
+              ("c-uuid-v7", "c-uuid-v7"),
+              ("fastuuid7", "fastuuid7"),
+              ("fastuuidv7", "fastuuidv7"),
+          ]
+
+          for label, dist_name in packages:
+              try:
+                  print(f"{label:<12} {md.version(dist_name)}")
+              except md.PackageNotFoundError:
+                  print(f"{label:<12} not installed")
+          PY
           echo ""
 
       - name: Run benchmark

@@ -5,6 +5,10 @@ use pyo3::types::{PyAny, PyBytes, PyString, PyTuple};
 use pyo3::ffi;
 use std::cell::Cell;
 use std::cell::RefCell;
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[cfg_attr(
     any(Py_3_14, all(Py_3_10, not(Py_LIMITED_API))),
@@ -126,21 +130,21 @@ impl UUID {
     }
 }
 
-/// Per-thread cache of a single UUID Python object.
-///
-/// Uses `Py<UUID>` in a `RefCell` inside TLS. The `Py<UUID>` destructor
-/// decrefs the Python object when the TLS slot is reset or the thread exits.
-/// This is safe because thread exit normally happens while the interpreter
-/// (and the module) are still alive.
-///
-/// The cache avoids the PyObject allocator on the hot path: when the cached
-/// UUID has refcount 1 (cache is sole owner), we mutate its inner `u128` via
-/// `Cell::set` through PyO3's `Bound::borrow()` and return it.
-///
-/// Safety model:
-/// - `thread_local!` for per-thread isolation + no subinterpreter cross-talk.
-/// - GIL serializes all access.
-/// - Refcount check (==1) guarantees sole ownership before mutation.
+// Per-thread cache of a single UUID Python object.
+//
+// Uses `Py<UUID>` in a `RefCell` inside TLS. The `Py<UUID>` destructor
+// decrefs the Python object when the TLS slot is reset or the thread exits.
+// This is safe because thread exit normally happens while the interpreter
+// (and the module) are still alive.
+//
+// The cache avoids the PyObject allocator on the hot path: when the cached
+// UUID has refcount 1 (cache is sole owner), we mutate its inner `u128` via
+// `Cell::set` through PyO3's `Bound::borrow()` and return it.
+//
+// Safety model:
+// - `thread_local!` for per-thread isolation + no subinterpreter cross-talk.
+// - GIL serializes all access.
+// - Refcount check (==1) guarantees sole ownership before mutation.
 thread_local! {
     static UUID_CACHE: RefCell<Option<Py<UUID>>> = const { RefCell::new(None) };
 }
