@@ -23,10 +23,10 @@ I found out about the `fast-rng` feature flag of `uuid` after creating this crat
 
 ## Comparison to `uuid` crate
 
-Compared to the standard `uuid` crate (which may take up to ~1.4µs / 1400ns per ID):
-*   **`fast-uuid-v7` can be up to ~165x faster** (8.4ns vs 1400ns).
-*   When using feature `fast-rng` on the original `uuid` crate, `fast-uuid-v7` can still be up to 
-10 times faster for `uint128` (8.4ns vs 90ns) and 8 times faster for `&str` generation (21.5ns vs 170ns).
+Compared to the standard `uuid` crate (~856ns per ID with its default secure RNG on this machine):
+*   **`fast-uuid-v7` can be around ~178x faster** (4.8ns vs 856ns).
+*   When using feature `fast-rng` on the original `uuid` crate, `fast-uuid-v7` is still about
+8 times faster for `uint128` (4.8ns vs 39ns) and 11 times faster for `&str` generation (6.8ns vs 73ns).
 
 ## Randomness vs Monotonicity
 
@@ -70,7 +70,7 @@ use fast_uuid_v7::{
 };
 
 fn main() {
-    // Get ID as u128 (74 bits random), takes about 8-50ns
+    // Get ID as u128 (74 bits random), takes about 5-50ns
     let id = gen_id();
     println!("Generated ID: {:032x}", id);
 
@@ -82,11 +82,11 @@ fn main() {
     let local_order_id = gen_id_with_sub_ms_8();
     println!("Locally ordered ID: {:032x}", local_order_id);
 
-    // Get ID as canonical string (allocates String, takes about 85-130ns)
+    // Get ID as canonical string (allocates String, takes about 43-130ns)
     let id_string = gen_id_string();
     println!("Generated ID string: {}", id_string);
 
-    // Get ID as stack-allocated string (zero allocation, implements Deref<Target=str>, takes about 21-60ns)
+    // Get ID as stack-allocated string (zero allocation, implements Deref<Target=str>, takes about 7-60ns)
     let stack_str = gen_id_str();
     println!("Generated ID stack string: {}", stack_str);
 }
@@ -96,11 +96,11 @@ fn main() {
 
 On a modern machine (e.g., Apple M1 or recent x86_64), you can expect:
 
-*   **`gen_id`**: ~8-50 ns
-*   **`gen_id_str`**: ~21-60 ns (zero-allocation)
-*   **`gen_id_string`**: ~85-130 ns (includes heap allocation)
+*   **`gen_id`**: ~5-50 ns
+*   **`gen_id_str`**: ~7-60 ns (zero-allocation)
+*   **`gen_id_string`**: ~43-130 ns (includes heap allocation)
 
-Generating 10 million IDs takes approximately **95ms** on a single core.
+Generating 10 million IDs takes approximately **45ms** on a single core.
 
 ### How is it so fast?
 
