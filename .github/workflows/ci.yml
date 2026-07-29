@@ -50,6 +50,61 @@ jobs:
     - name: Run bench
       run: cargo bench
 
+  python-freethreaded:
+    name: Python free-threaded smoke test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Set up free-threaded Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14t"
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Build free-threaded wheel
+      uses: PyO3/maturin-action@v1
+      with:
+        working-directory: python
+        args: --release --out dist --interpreter python3.14t
+        sccache: 'true'
+        # Build natively against the host free-threaded interpreter rather than
+        # inside a manylinux container (which ships only GIL-enabled Pythons).
+        container: 'off'
+    - name: Install and smoke test (GIL disabled)
+      shell: bash
+      run: |
+        python3.14t -m pip install --upgrade pip
+        python3.14t -m pip install python/dist/*.whl
+        python3.14t - <<'PY'
+        import sys, threading, fastuuidv7
+
+        # Proves the module runs GIL-free: it must NOT force the GIL back on.
+        # (Re-adding `gil_used = true` to the pymodule would fail here.)
+        assert not sys._is_gil_enabled(), "GIL is enabled — module forced it on"
+
+        # Parallel generation: each thread has its own generator state, so this
+        # must scale without a lock and never collide (74 random bits per id).
+        out = []
+        def work():
+            out.append([fastuuidv7.gen_id_str() for _ in range(10_000)])
+        threads = [threading.Thread(target=work) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        ids = [u for chunk in out for u in chunk]
+        assert len(ids) == 80_000
+        assert len(set(ids)) == len(ids), "duplicate ids generated across threads"
+
+        # Exercise the UUID-object path (fresh-alloc under free-threading).
+        assert str(fastuuidv7.uuid7())
+
+        print("gil_enabled:", sys._is_gil_enabled())
+        print("generated:", len(ids), "unique:", len(set(ids)))
+        PY
+
   sub-ms-diagnostic:
     name: Sub-ms Diagnostic ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

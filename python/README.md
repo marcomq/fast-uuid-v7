@@ -65,16 +65,16 @@ Current results on macOS arm64 with Python 3.14.4:
 
 | Package | Callable | Time per call |
 | --- | --- | ---: |
-| `uuid6` | `uuid6.uuid7` | `1999.5 ns` |
-| `uuid-v7` | `uuid_v7.base.uuid7` | `2582.4 ns` |
-| `uuid7` | `uuid_extensions.uuid7` | `1969.2 ns` |
-| `uuid` | `uuid.uuid7` | `1579.9 ns` |
-| [`fastuuid7`](https://github.com/nekrasovp/uuidv7) | `uuidv7.uuid7` | `298.6 ns` |
-| [`uuid-utils`](https://github.com/aminalaee/uuid-utils) | `uuid_utils.uuid7` | `96.8 ns` |
-| [`c-uuid-v7`](https://github.com/lava-sh/c_uuid_v7) | `c_uuid_v7.uuid7` | `59.4 ns` |
-| `fastuuidv7` | `fastuuidv7.uuid7_str` | `24.5 ns` |
+| `uuid-v7` | `uuid_v7.base.uuid7` | `2574.2 ns` |
+| `uuid7` | `uuid_extensions.uuid7` | `1969.0 ns` |
+| `uuid6` | `uuid6.uuid7` | `1946.2 ns` |
+| `uuid` | `uuid.uuid7` | `1588.9 ns` |
+| [`fastuuid7`](https://github.com/nekrasovp/uuidv7) | `fastuuid7.uuid7` | `126.3 ns` |
+| [`uuid-utils`](https://github.com/aminalaee/uuid-utils) | `uuid_utils.uuid7` | `100.8 ns` |
+| [`c-uuid-v7`](https://github.com/lava-sh/c_uuid_v7) | `c_uuid_v7.uuid7` | `40.7 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7` | `22.2 ns` |
 
-The linux x86 GH runner shows similar times for `fastuuidv7` as for `c-uuid-v7`.
+On linux x86 GH `c-uuid-v7` can still be about 5-10% faster than `fastuuidv7` - 40 ns vs 44ns. There are bench results that run for each fastuuidv7 release.
 
 Notes:
 

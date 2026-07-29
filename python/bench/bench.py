@@ -6,6 +6,18 @@ import timeit
 import uuid
 
 CALLS = 500_000
+REPEAT = 3
+
+PACKAGE_VERSIONS = [
+    ("uuid6", "uuid6"),
+    ("uuid-v7", "uuid-v7"),
+    ("uuid7", "uuid7"),
+    ("uuid-utils", "uuid-utils"),
+    ("uuidv7", "uuidv7"),
+    ("c-uuid-v7", "c-uuid-v7"),
+    ("fastuuid7", "fastuuid7"),
+    ("fastuuidv7", "fastuuidv7"),
+]
 
 
 def optional_module(name):
@@ -101,9 +113,10 @@ def resolve_benchmarks():
                 seen.add(name)
                 benchmarks.append((name, fn))
 
-    if hasattr(uuid, "uuid7"):
+    uuid7_callable = getattr(uuid, "uuid7", None)
+    if callable(uuid7_callable):
         if "uuid.uuid7" not in seen:
-            benchmarks.append(("uuid.uuid7", uuid.uuid7))
+            benchmarks.append(("uuid.uuid7", uuid7_callable))
     else:
         skipped.append("uuid.uuid7")
 
@@ -111,10 +124,24 @@ def resolve_benchmarks():
 
 
 def benchmark(name, fn):
-    elapsed = timeit.timeit(fn, number=CALLS)
+    # Take the fastest of REPEAT runs to reject scheduler/VM noise.
+    elapsed = min(timeit.repeat(fn, number=CALLS, repeat=REPEAT))
     ops_per_sec = CALLS / elapsed
     ns_per_call = elapsed * 1e9 / CALLS
     print(f"{name:24} {ops_per_sec:12.0f} ops/s  {ns_per_call:10.1f} ns/call")
+
+
+def print_package_versions():
+    print("Installed benchmark package versions:")
+    for label, dist_name in PACKAGE_VERSIONS:
+        try:
+            version = importlib.metadata.version(dist_name)
+        except importlib.metadata.PackageNotFoundError:
+            version = "not installed"
+
+        print(f"  {label:<12} {version}")
+
+    print()
 
 
 def main():
@@ -122,6 +149,7 @@ def main():
     print("Includes Python/native boundary overhead when calling extension modules.")
     print()
 
+    print_package_versions()
     benchmarks, skipped = resolve_benchmarks()
     for name in skipped:
         print(f"Skipping {name}: not installed or no known UUIDv7 callable found")

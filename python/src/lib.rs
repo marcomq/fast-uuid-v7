@@ -2,9 +2,15 @@ use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyString, PyTuple};
+#[cfg(not(Py_GIL_DISABLED))]
 use pyo3::ffi;
 use std::cell::Cell;
+#[cfg(not(Py_GIL_DISABLED))]
 use std::cell::RefCell;
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[cfg_attr(
     any(Py_3_14, all(Py_3_10, not(Py_LIMITED_API))),
@@ -126,21 +132,34 @@ impl UUID {
     }
 }
 
-/// Per-thread cache of a single UUID Python object.
-///
-/// Uses `Py<UUID>` in a `RefCell` inside TLS. The `Py<UUID>` destructor
-/// decrefs the Python object when the TLS slot is reset or the thread exits.
-/// This is safe because thread exit normally happens while the interpreter
-/// (and the module) are still alive.
-///
-/// The cache avoids the PyObject allocator on the hot path: when the cached
-/// UUID has refcount 1 (cache is sole owner), we mutate its inner `u128` via
-/// `Cell::set` through PyO3's `Bound::borrow()` and return it.
-///
-/// Safety model:
-/// - `thread_local!` for per-thread isolation + no subinterpreter cross-talk.
-/// - GIL serializes all access.
-/// - Refcount check (==1) guarantees sole ownership before mutation.
+// Per-thread cache of a single UUID Python object.
+//
+// GIL builds only. The whole cache is compiled out under `Py_GIL_DISABLED`
+// (free-threaded Python), where `uuid7_with_cache_id` allocates fresh instead
+// (see below) — the refcount-based reuse trick relies on the GIL and has no
+// safe, allocation-free equivalent without one.
+//
+// Uses `Py<UUID>` in a `RefCell` inside TLS. The `Py<UUID>` destructor
+// decrefs the Python object when the TLS slot is reset or the thread exits.
+// This is safe because thread exit normally happens while the interpreter
+// (and the module) are still alive.
+//
+// The cache avoids the PyObject allocator on the hot path: when the cached
+// UUID has refcount 1 (cache is sole owner), we mutate its inner `u128` via
+// `Cell::set` through PyO3's `Bound::borrow()` and return it.
+//
+// Safety model:
+// - The GIL serializes the refcount check + in-place mutation. On GIL builds
+//   the GIL always exists; on free-threaded builds this code does not compile,
+//   so the invariant cannot be violated.
+// - Refcount check (==1) guarantees sole ownership before mutation.
+// - `thread_local!` is per-OS-thread, not per-interpreter, so it does NOT by
+//   itself isolate subinterpreters that share a thread. We rely instead on
+//   PyO3's default of rejecting import into a subinterpreter with its own GIL;
+//   without that a `Py<UUID>` cached under one interpreter could be handed to
+//   another. If per-interpreter GIL support is ever enabled, this cache must
+//   move to interpreter-keyed state cleaned up before finalization.
+#[cfg(not(Py_GIL_DISABLED))]
 thread_local! {
     static UUID_CACHE: RefCell<Option<Py<UUID>>> = const { RefCell::new(None) };
 }
@@ -151,7 +170,15 @@ fn uuid7_with_cache(py: Python<'_>) -> Py<UUID> {
 
 #[inline(always)]
 fn uuid7_with_cache_id(py: Python<'_>, id: u128) -> Py<UUID> {
-    UUID_CACHE.with(|cache| {
+    // Free-threaded (no-GIL) build: the reuse trick below relies on the GIL to
+    // serialize the refcount check and in-place mutation, so we allocate a fresh
+    // object each call. Generation stays fully parallel and lock-free (per-thread
+    // generator state); only per-call allocation elision is given up.
+    #[cfg(Py_GIL_DISABLED)]
+    return Py::new(py, UUID::new(id)).expect("failed to allocate fastuuidv7.UUID");
+
+    #[cfg(not(Py_GIL_DISABLED))]
+    return UUID_CACHE.with(|cache| {
         let mut borrow = cache.borrow_mut();
         if let Some(cached) = borrow.as_ref() {
             // SAFETY: GIL held, pointer valid, no concurrent refcount changes.
@@ -175,11 +202,13 @@ fn uuid7_with_cache_id(py: Python<'_>, id: u128) -> Py<UUID> {
         let new = Py::new(py, UUID::new(id)).expect("failed to allocate fastuuidv7.UUID");
         *borrow = Some(new.clone_ref(py));
         new
-    })
+    });
 }
 
 #[pyfunction]
 fn reset_uuid_cache() {
+    // No-op on free-threaded builds: there is no cache to clear.
+    #[cfg(not(Py_GIL_DISABLED))]
     UUID_CACHE.with(|cache| {
         *cache.borrow_mut() = None;
     });
@@ -359,6 +388,11 @@ fn uuid7_with_count(py: Python<'_>) -> Py<UUID> {
     uuid7_with_cache_id(py, fast_uuid_v7::gen_id_with_count())
 }
 
+// This module supports free-threaded (no-GIL) Python: the generator state is
+// per-thread (`STATE` thread-local in the core crate), so ID generation is
+// lock-free and fully parallel. The only GIL-dependent optimization is the
+// `UUID`-object cache, which is compiled out on free-threaded builds (see
+// `uuid7_with_cache_id`). Hence no `gil_used = true` opt-out is needed.
 #[pymodule]
 fn fastuuidv7(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<UUID>()?;

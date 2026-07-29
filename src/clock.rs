@@ -152,18 +152,56 @@ fn read_counter() -> u64 {
 
 #[cfg(target_arch = "x86_64")]
 fn counter_ticks_per_ms() -> u64 {
-    // Default to 2GHz (2000 MHz) if detection fails.
-    let mut base_mhz = 2000;
-
+    // Prefer the CPU's declared base frequency (CPUID leaf 0x16): exact and cheap.
     let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
     if max_leaf >= 0x16 {
         let res = std::arch::x86_64::__cpuid(0x16);
         if res.eax > 0 {
-            base_mhz = res.eax as u64;
+            return (res.eax as u64) * 1000;
         }
     }
 
-    base_mhz * 1000
+    // Leaf 0x16 is frequently not exposed under virtualization (e.g. Hyper-V on
+    // Azure, which backs the Linux CI runners). Rather than assume a fixed 2 GHz
+    // clock, measure the TSC rate against the monotonic clock once per process.
+    calibrated_ticks_per_ms()
+}
+
+#[cfg(target_arch = "x86_64")]
+fn calibrated_ticks_per_ms() -> u64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    // 2 GHz last-resort guess if the measurement itself fails.
+    const FALLBACK_TICKS_PER_MS: u64 = 2_000_000;
+
+    static CACHED: OnceLock<u64> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        let start_instant = Instant::now();
+        let start_tsc = read_counter();
+        // Busy-wait a short, fixed interval, then derive ticks-per-ms from the
+        // measured elapsed nanoseconds. 200 us keeps startup cheap while giving
+        // sub-percent accuracy against the ~1 ns monotonic-clock resolution.
+        while start_instant.elapsed().as_micros() < 200 {
+            std::hint::spin_loop();
+        }
+        let elapsed_ticks = read_counter().wrapping_sub(start_tsc);
+        let elapsed_nanos = start_instant.elapsed().as_nanos() as u64;
+        ticks_per_ms_from_measurement(elapsed_ticks, elapsed_nanos)
+            .unwrap_or(FALLBACK_TICKS_PER_MS)
+    })
+}
+
+/// Derives ticks-per-millisecond from a measured `(elapsed_ticks, elapsed_nanos)`
+/// pair. Returns `None` for a degenerate measurement so the caller can fall back.
+#[inline(always)]
+#[cfg(any(test, target_arch = "x86_64"))]
+fn ticks_per_ms_from_measurement(elapsed_ticks: u64, elapsed_nanos: u64) -> Option<u64> {
+    if elapsed_ticks == 0 || elapsed_nanos == 0 {
+        return None;
+    }
+    // ticks/ms = elapsed_ticks / elapsed_ms = elapsed_ticks * 1e6 / elapsed_ns
+    Some((elapsed_ticks.saturating_mul(1_000_000) / elapsed_nanos).max(1))
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -292,6 +330,24 @@ mod tests {
             estimate_nanos_within_ms_from_ticks(1_000, 900_000, 200),
             999_999
         );
+    }
+
+    #[test]
+    fn test_ticks_per_ms_from_measurement_computes_rate() {
+        // 600_000 ticks over 200 us => 3.0 GHz => 3_000_000 ticks/ms.
+        assert_eq!(ticks_per_ms_from_measurement(600_000, 200_000), Some(3_000_000));
+    }
+
+    #[test]
+    fn test_ticks_per_ms_from_measurement_floors_to_at_least_one() {
+        // A vanishingly slow apparent rate must never round down to zero.
+        assert_eq!(ticks_per_ms_from_measurement(1, 1_000_000_000), Some(1));
+    }
+
+    #[test]
+    fn test_ticks_per_ms_from_measurement_rejects_degenerate_input() {
+        assert_eq!(ticks_per_ms_from_measurement(0, 200_000), None);
+        assert_eq!(ticks_per_ms_from_measurement(600_000, 0), None);
     }
 
     #[test]
