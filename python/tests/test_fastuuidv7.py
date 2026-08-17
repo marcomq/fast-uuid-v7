@@ -1,3 +1,4 @@
+import threading
 import unittest
 import uuid
 
@@ -95,6 +96,71 @@ class FastUuidV7Tests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError, OverflowError)) as ctx:
                     fastuuidv7.format_uuid(value)
                 self.assertTrue(str(ctx.exception))
+
+
+class SequentialGeneratorTests(unittest.TestCase):
+    def test_ids_are_strictly_increasing(self):
+        gen = fastuuidv7.SequentialGenerator()
+        ids = [gen.next_id() for _ in range(300_000)]
+        self.assertTrue(all(a < b for a, b in zip(ids, ids[1:])))
+
+    def test_ids_are_uuid_v7(self):
+        gen = fastuuidv7.SequentialGenerator()
+        for _ in range(100):
+            parsed = uuid.UUID(int=gen.next_id())
+            self.assertEqual(parsed.version, 7)
+            self.assertEqual(parsed.variant, uuid.RFC_4122)
+
+    def test_strings_sort_in_generation_order(self):
+        gen = fastuuidv7.SequentialGenerator()
+        ids = [gen.next_id_str() for _ in range(10_000)]
+        self.assertEqual(ids, sorted(ids))
+
+    def test_bytes_sort_in_generation_order(self):
+        gen = fastuuidv7.SequentialGenerator()
+        ids = [gen.next_id_bytes() for _ in range(10_000)]
+        self.assertEqual(len(ids[0]), 16)
+        self.assertEqual(ids, sorted(ids))
+
+    def test_next_uuid_returns_uuid_object(self):
+        gen = fastuuidv7.SequentialGenerator()
+        first = gen.next_uuid()
+        second = gen.next_uuid()
+        self.assertIsInstance(first, fastuuidv7.UUID)
+        self.assertLess(first, second)
+
+    def test_accessors_share_one_sequence(self):
+        gen = fastuuidv7.SequentialGenerator()
+        values = [
+            gen.next_id(),
+            int(uuid.UUID(gen.next_id_str())),
+            int.from_bytes(gen.next_id_bytes(), "big"),
+            gen.next_uuid().int,
+        ]
+        self.assertEqual(values, sorted(values))
+        self.assertEqual(len(set(values)), len(values))
+
+    def test_instances_are_independent(self):
+        first, second = (
+            fastuuidv7.SequentialGenerator(),
+            fastuuidv7.SequentialGenerator(),
+        )
+        self.assertNotEqual(first.next_id(), second.next_id())
+
+    def test_ordering_survives_thread_handoff(self):
+        gen = fastuuidv7.SequentialGenerator()
+        ids = [gen.next_id()]
+
+        def take_one():
+            ids.append(gen.next_id())
+
+        for _ in range(8):
+            thread = threading.Thread(target=take_one)
+            thread.start()
+            thread.join()
+
+        self.assertEqual(ids, sorted(ids))
+        self.assertEqual(len(set(ids)), len(ids))
 
 
 if __name__ == "__main__":

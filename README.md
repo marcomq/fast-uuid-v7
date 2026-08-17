@@ -40,6 +40,11 @@ The `gen_id_with_count` function uses an 18-bit counter and 56 bits of randomnes
 *   **Pros**: Guarantees monotonicity per thread (up to ~262k IDs/ms).
 *   **Cons**: Reduced randomness (56 bits) increases collision risk in massive distributed systems (approx. 50% chance after 4.5 billion IDs/ms globally).
 
+### `SequentialGenerator` (56 bits randomness + seeded 18-bit counter)
+`SequentialGenerator` owns its state instead of using the thread-local fast path, and guarantees that every id is strictly greater than the previous one from the same instance — numerically and lexicographically. The counter is randomly seeded in its low 12 bits on each new millisecond as RFC 9562 §6.2 prescribes, the timestamp never moves backwards, and counter exhaustion advances the timestamp by 1ms. Useful for assigning ids to rows read sequentially from a CSV / JSONL file, so the input order survives sorting by key, e.g. in S3. The generator is also an infinite `Iterator`, so ids can be zipped straight onto rows.
+*   **Pros**: Strict ordering guarantee, no effect on the `gen_id_*` functions.
+*   **Cons**: Guarantee is per instance only — not across instances, threads or processes. Same 56-bit randomness trade-off as `gen_id_with_count`. At least 258,049 ids per millisecond before the timestamp is pushed ahead of the wall clock; a tight generation loop can outrun that, though it catches up as soon as generation pauses.
+
 ### `gen_id_with_sub_ms_4`, `gen_id_with_sub_ms_8`, `gen_id_with_sub_ms_12`
 These functions keep the standard 48-bit millisecond timestamp, then place a scaled sub-millisecond fraction into the high bits of `rand_a` as described by RFC 9562. The remaining bits of `rand_a` stay random, and `rand_b` stays fully random. The millisecond timestamp comes from wall-clock time, but on supported counter backends the sub-millisecond fraction is often estimated between wall-clock refreshes instead of being freshly measured on every call.
 *   **Pros**: Improves sort locality for IDs created within the same millisecond without adding counters or shared state.
@@ -61,12 +66,14 @@ The 128-bit ID is fully compatible with UUID v7. It is composed of:
 *   `gen_id_with_sub_ms_8`: **66 bits**
 *   `gen_id_with_sub_ms_12`: **62 bits**
 *   `gen_id_with_count`: **56 bits**
+*   `SequentialGenerator`: **56 bits**
 
 ## Usage
 
 ```rust
 use fast_uuid_v7::{
     gen_id, gen_id_str, gen_id_string, gen_id_with_count, gen_id_with_sub_ms_8,
+    SequentialGenerator,
 };
 
 fn main() {
@@ -77,6 +84,11 @@ fn main() {
     // Get monotonic ID (56 bits random + 18-bit counter)
     let ordered_id = gen_id_with_count();
     println!("Ordered ID: {:032x}", ordered_id);
+
+    // Strictly increasing IDs from one instance, e.g. per input file
+    let mut sequential = SequentialGenerator::new();
+    println!("Row 1: {}", sequential.next_id_str());
+    println!("Row 2: {}", sequential.next_id_str());
 
     // Get an ID with 8 bits of sub-millisecond time fraction in rand_a
     let local_order_id = gen_id_with_sub_ms_8();
@@ -99,6 +111,7 @@ On a modern machine (e.g., Apple M1 or recent x86_64), you can expect:
 *   **`gen_id`**: ~5-50 ns
 *   **`gen_id_str`**: ~7-60 ns (zero-allocation)
 *   **`gen_id_string`**: ~43-130 ns (includes heap allocation)
+*   **`SequentialGenerator::next_id`**: ~3-50 ns
 
 Generating 10 million IDs takes approximately **45ms** on a single core.
 
@@ -113,7 +126,7 @@ Generating 10 million IDs takes approximately **45ms** on a single core.
 ### Limitations
 
 *   **Not Cryptographically Secure**: The randomness is optimized for speed, not unpredictability. Do not use for session tokens or secrets. If you don't need speed, use the original `uuid` crate.
-*   **Monotonicity**: Only guaranteed per-thread if using `gen_id_with_count`. Otherwise, IDs within the same millisecond are random.
+*   **Monotonicity**: Only guaranteed per-thread if using `gen_id_with_count`, or per-instance with `SequentialGenerator`. Otherwise, IDs within the same millisecond are random.
 *   **Sub-millisecond fractions are approximate**: the `gen_id_with_sub_ms_*` variants improve intra-millisecond sort locality, but the extra bits are often estimated rather than freshly measured and are not a true higher-resolution timestamp.
 *   **Clock Drift Risk**: The batched timestamp check assumes the CPU counter frequency is stable. While we include safety checks, extreme edge cases (e.g., VM migration) might cause a 1ms timestamp lag.
 *   **Still needs wall-clock reads**: The fastest path only happens while we can reuse the last millisecond timestamp. Once the next millisecond boundary is due, we still need to refresh from `SystemTime::now()`, so actual throughput depends on workload and platform details.

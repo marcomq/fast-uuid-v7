@@ -55,6 +55,9 @@ fn x86_has_ssse3() -> bool {
 }
 
 mod clock;
+mod sequential;
+
+pub use sequential::SequentialGenerator;
 
 struct ThreadState {
     rng: SmallRng,
