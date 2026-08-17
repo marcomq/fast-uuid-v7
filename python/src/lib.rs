@@ -400,8 +400,10 @@ fn uuid7_with_count(py: Python<'_>) -> Py<UUID> {
 /// The guarantee is per instance; it is not shared across instances or
 /// processes. The state lives in the instance rather than in a thread-local, so
 /// an instance may be handed from one thread to another and keeps its ordering
-/// guarantee. It is not built for concurrent use from several threads at once —
-/// give each thread its own instance.
+/// guarantee. It is not built for concurrent use from several threads at once:
+/// the methods take the instance mutably, so a call that overlaps another call
+/// on the same instance raises `RuntimeError` (object already borrowed). Give
+/// each thread its own instance.
 #[pyclass(module = "fastuuidv7")]
 struct SequentialGenerator {
     inner: fast_uuid_v7::SequentialGenerator,

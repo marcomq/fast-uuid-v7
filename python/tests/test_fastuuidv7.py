@@ -102,7 +102,7 @@ class SequentialGeneratorTests(unittest.TestCase):
     def test_ids_are_strictly_increasing(self):
         gen = fastuuidv7.SequentialGenerator()
         ids = [gen.next_id() for _ in range(300_000)]
-        self.assertTrue(all(a < b for a, b in zip(ids, ids[1:])))
+        self.assertTrue(all(ids[i] < ids[i + 1] for i in range(len(ids) - 1)))
 
     def test_ids_are_uuid_v7(self):
         gen = fastuuidv7.SequentialGenerator()
