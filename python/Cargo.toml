@@ -15,8 +15,17 @@ mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 fast-uuid-v7 = { path = ".." }
-mimalloc = { version = "0.1", default-features = false, optional = true }
 pyo3 = { version = "0.29.0", features = ["extension-module"] }
+
+# The extension module is dlopen'd by CPython, so mimalloc's thread-locals must
+# use the dynamic TLS model — the default initial-exec model draws from the fixed
+# static TLS surplus and fails to load on slim images ("cannot allocate memory in
+# static TLS block"). Not applicable on macOS/Windows.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+mimalloc = { version = "0.1", default-features = false, features = ["local_dynamic_tls"], optional = true }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "freebsd")))'.dependencies]
+mimalloc = { version = "0.1", default-features = false, optional = true }
 
 [build-dependencies]
 pyo3-build-config = "0.29.0"
