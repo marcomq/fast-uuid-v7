@@ -52,6 +52,25 @@ fastuuidv7.uuid7_hex()  # str without dashes
 fastuuidv7.uuid7_bytes()
 ```
 
+### Strictly increasing ids
+
+`SequentialGenerator` guarantees that every id is greater than the previous one
+from the same instance, numerically and lexicographically. Use one instance per
+input file when ingesting CSV / JSONL rows, so the input order survives sorting
+by key.
+
+```python
+gen = fastuuidv7.SequentialGenerator()
+
+for row in reader:
+    row["id"] = gen.next_id_str()   # also: next_id(), next_id_bytes(), next_uuid()
+```
+
+The guarantee is per instance — it is not shared across instances or processes.
+An instance may be handed from one thread to another and keeps its ordering
+guarantee, but it is not built for concurrent use from several threads at once;
+give each thread its own instance.
+
 ## Benchmarks
 
 ```bash

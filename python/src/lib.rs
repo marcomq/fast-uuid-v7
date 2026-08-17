@@ -390,6 +390,52 @@ fn uuid7_with_count(py: Python<'_>) -> Py<UUID> {
     uuid7_with_cache_id(py, fast_uuid_v7::gen_id_with_count())
 }
 
+/// Generates strictly increasing UUID v7 values from its own state.
+///
+/// Each instance guarantees that every generated id is greater than the
+/// previous one, numerically and lexicographically. Intended for assigning ids
+/// to rows read sequentially from a CSV / JSONL file, so the order survives
+/// sorting by key, e.g. in S3.
+///
+/// The guarantee is per instance; it is not shared across instances or
+/// processes. The state lives in the instance rather than in a thread-local, so
+/// an instance may be handed from one thread to another and keeps its ordering
+/// guarantee. It is not built for concurrent use from several threads at once:
+/// the methods take the instance mutably, so a call that overlaps another call
+/// on the same instance raises `RuntimeError` (object already borrowed). Give
+/// each thread its own instance.
+#[pyclass(module = "fastuuidv7")]
+struct SequentialGenerator {
+    inner: fast_uuid_v7::SequentialGenerator,
+}
+
+#[pymethods]
+impl SequentialGenerator {
+    #[new]
+    fn py_new() -> Self {
+        Self {
+            inner: fast_uuid_v7::SequentialGenerator::new(),
+        }
+    }
+
+    fn next_id(&mut self) -> u128 {
+        self.inner.next_id()
+    }
+
+    fn next_id_str<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyString> {
+        let uuid_str = self.inner.next_id_str();
+        py_ascii_string_from_bytes(py, uuid_str.as_bytes())
+    }
+
+    fn next_id_bytes<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.next_id().to_be_bytes())
+    }
+
+    fn next_uuid(&mut self, py: Python<'_>) -> Py<UUID> {
+        uuid7_with_cache_id(py, self.inner.next_id())
+    }
+}
+
 // This module supports free-threaded (no-GIL) Python: the generator state is
 // per-thread (`STATE` thread-local in the core crate), so ID generation is
 // lock-free and fully parallel. The only GIL-dependent optimization is the
@@ -398,6 +444,7 @@ fn uuid7_with_count(py: Python<'_>) -> Py<UUID> {
 #[pymodule]
 fn fastuuidv7(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<UUID>()?;
+    m.add_class::<SequentialGenerator>()?;
     m.add_function(wrap_pyfunction!(gen_id, m)?)?;
     m.add_function(wrap_pyfunction!(gen_id_with_sub_ms_4, m)?)?;
     m.add_function(wrap_pyfunction!(gen_id_with_sub_ms_8, m)?)?;

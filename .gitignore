@@ -26,6 +26,8 @@ target
 
 /target
 
-# Python bytecode caches
+# Python bytecode caches and compiled extension modules
 __pycache__/
 *.pyc
+*.so
+*.pyd
