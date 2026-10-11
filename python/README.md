@@ -82,24 +82,27 @@ python3 bench/bench.py --markdown results.md
 
 The benchmark measures repeated single calls, so the numbers include Python/native boundary overhead. It reports the fastest of 3 runs of 500,000 calls each. Install comparison packages such as `uuid-utils` before running; missing packages are skipped.
 
-Results from the [Python Benchmark workflow](https://github.com/marcomq/fast-uuid-v7/actions/workflows/benchmark-python.yml) on GitHub-hosted runners with Python 3.11 and the `fastuuidv7` 0.1.9 release from PyPI ([run of 2026-10-11](https://github.com/marcomq/fast-uuid-v7/actions/runs/38146729141)), time per call:
+Results from the [Python Benchmark workflow](https://github.com/marcomq/fast-uuid-v7/actions/workflows/benchmark-python.yml) on GitHub-hosted runners with Python 3.11, `fastuuidv7` 0.1.10 built from commit `7601a77` ([run of 2026-10-11](https://github.com/marcomq/fast-uuid-v7/actions/runs/38155377723)), time per call:
 
 | Package | Callable | Linux x86_64 | Windows x86_64 | macOS arm64 |
 | --- | --- | ---: | ---: | ---: |
-| `uuid-v7` 1.0.0 | `uuid_v7.base.uuid7` | `3239.7 ns` | `2645.8 ns` | `3088.5 ns` |
-| `uuid7` 0.1.0 | `uuid_extensions.uuid7` | `2260.7 ns` | `1571.0 ns` | `2224.7 ns` |
-| `uuid6` 2025.0.1 | `uuid6.uuid7` | `2361.1 ns` | `1757.2 ns` | `2077.1 ns` |
-| [`fastuuid7`](https://github.com/nekrasovp/uuidv7) 0.5.0 | `fastuuid7.uuid7` | `489.5 ns` | `112.8 ns` | `147.4 ns` |
-| [`uuid-utils`](https://github.com/aminalaee/uuid-utils) 1.0.0 | `uuid_utils.uuid7` | `110.9 ns` | `109.6 ns` | `172.7 ns` |
-| [`c-uuid-v7`](https://github.com/lava-sh/c_uuid_v7) 0.0.11 | `c_uuid_v7.uuid7` | `34.1 ns` | `43.8 ns` | `40.7 ns` |
-| `fastuuidv7` | `fastuuidv7.uuid7` | `31.4 ns` | `37.2 ns` | `24.0 ns` |
-| `fastuuidv7` | `fastuuidv7.uuid7_str` | `37.9 ns` | `53.0 ns` | `36.3 ns` |
+| `uuid-v7` 1.0.0 | `uuid_v7.base.uuid7` | `2287.1 ns` | `3388.8 ns` | `2337.4 ns` |
+| `uuid7` 0.1.0 | `uuid_extensions.uuid7` | `1648.4 ns` | `2065.3 ns` | `1728.1 ns` |
+| `uuid6` 2025.0.1 | `uuid6.uuid7` | `1665.1 ns` | `2262.7 ns` | `1929.3 ns` |
+| [`fastuuid7`](https://github.com/nekrasovp/uuidv7) 0.5.0 | `fastuuid7.uuid7` | `270.9 ns` | `144.2 ns` | `123.8 ns` |
+| [`uuid-utils`](https://github.com/aminalaee/uuid-utils) 1.0.0 | `uuid_utils.uuid7` | `88.4 ns` | `157.0 ns` | `122.5 ns` |
+| [`c-uuid-v7`](https://github.com/lava-sh/c_uuid_v7) 0.0.11 | `str(c_uuid_v7.uuid7())` | `45.1 ns` | `91.2 ns` | `128.3 ns` |
+| [`c-uuid-v7`](https://github.com/lava-sh/c_uuid_v7) 0.0.11 | `c_uuid_v7.uuid7` | `27.5 ns` | `53.2 ns` | `61.0 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7_str` | `25.4 ns` | `60.4 ns` | `31.3 ns` |
+| `fastuuidv7` | `fastuuidv7.uuid7` | `19.0 ns` | `42.1 ns` | `20.0 ns` |
+
+`c-uuid-v7` has no function that returns a string directly, so `str(c_uuid_v7.uuid7())` is its counterpart to `fastuuidv7.uuid7_str`.
 
 How to read these numbers:
 
 - Every run of the workflow publishes the full tables, including the runner's CPU, on the summary page of that run. It runs for each change to the package on `main` and for pull requests.
-- Runner hardware differs from run to run, and absolute times have moved by 20-40% between two runs of the same code. Compare packages within one run, not absolute times across runs.
-- The lead over `c-uuid-v7` on x86_64 is within that noise: `fastuuidv7.uuid7` was about 8% faster on Linux and 15% faster on Windows in this run, and about 19% slower on Linux in another run of the same 0.1.9 wheel on the same day.
+- Runner hardware differs from run to run (this run: AMD EPYC 9V45 on Linux, an AMD family 25 CPU on Windows), and absolute times have moved by 20-40% between two runs of the same code. Compare packages within one run, not absolute times across runs.
+- In this run `fastuuidv7.uuid7` was about 31% faster than `c_uuid_v7.uuid7` on Linux and 21% faster on Windows. Treat the size of that lead with care: two runs of the same 0.1.9 wheel on the same day put it 8% ahead on Linux in one and 19% behind in the other.
 - The standard library's `uuid.uuid7` needs Python 3.14 and is therefore missing from the CI table. A local run on macOS arm64 with Python 3.14.4 measured `1588.9 ns` per call.
 
 ## Notes

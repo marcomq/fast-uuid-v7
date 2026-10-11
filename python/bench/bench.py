@@ -107,6 +107,19 @@ def resolve_benchmarks():
         seen.add(name)
         benchmarks.append((name, fn, None))
 
+    uuid7_callable = getattr(uuid, "uuid7", None)
+    if callable(uuid7_callable):
+        if "uuid.uuid7" not in seen:
+            benchmarks.append(("uuid.uuid7", uuid7_callable, None))
+    else:
+        skipped.append("uuid.uuid7")
+
+    # c-uuid-v7 has no string generator, so str() of its UUID is the counterpart
+    # of fastuuidv7.uuid7_str.
+    fn = getattr(optional_module("c_uuid_v7"), "uuid7", None)
+    if callable(fn):
+        benchmarks.append(("str(c_uuid_v7.uuid7())", "str(uuid7())", {"uuid7": fn}))
+
     local = optional_module("fastuuidv7")
     if local is None:
         skipped.append("fastuuidv7")
@@ -117,20 +130,6 @@ def resolve_benchmarks():
             if callable(fn) and name not in seen:
                 seen.add(name)
                 benchmarks.append((name, fn, None))
-
-    uuid7_callable = getattr(uuid, "uuid7", None)
-    if callable(uuid7_callable):
-        if "uuid.uuid7" not in seen:
-            benchmarks.append(("uuid.uuid7", uuid7_callable, None))
-    else:
-        skipped.append("uuid.uuid7")
-
-    # c-uuid-v7 has no string generator, so str() of its UUID is the counterpart
-    # of fastuuidv7.uuid7_str. fastuuidv7 is measured the same way for scale.
-    for module_name in ("c_uuid_v7", "fastuuidv7"):
-        fn = getattr(optional_module(module_name), "uuid7", None)
-        if callable(fn):
-            benchmarks.append((f"str({module_name}.uuid7())", "str(uuid7())", {"uuid7": fn}))
 
     return benchmarks, skipped
 
