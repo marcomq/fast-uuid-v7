@@ -59,7 +59,8 @@ jobs:
       - name: Install built package
         shell: bash
         run: |
-          pip install --find-links python/dist fastuuidv7
+          # --no-index: never fall back to the PyPI release of the same version.
+          pip install --no-index --find-links python/dist fastuuidv7
 
       - name: Install comparison packages
         shell: bash

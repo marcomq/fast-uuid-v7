@@ -82,7 +82,7 @@ python3 bench/bench.py --markdown results.md
 
 The benchmark measures repeated single calls, so the numbers include Python/native boundary overhead. It reports the fastest of 3 runs of 500,000 calls each. Install comparison packages such as `uuid-utils` before running; missing packages are skipped.
 
-Results from the [Python Benchmark workflow](https://github.com/marcomq/fast-uuid-v7/actions/workflows/benchmark-python.yml) on GitHub-hosted runners with Python 3.11, `fastuuidv7` 0.1.9 (commit `451a32c`, [run of 2026-10-11](https://github.com/marcomq/fast-uuid-v7/actions/runs/38146729141)), time per call:
+Results from the [Python Benchmark workflow](https://github.com/marcomq/fast-uuid-v7/actions/workflows/benchmark-python.yml) on GitHub-hosted runners with Python 3.11 and the `fastuuidv7` 0.1.9 release from PyPI ([run of 2026-10-11](https://github.com/marcomq/fast-uuid-v7/actions/runs/38146729141)), time per call:
 
 | Package | Callable | Linux x86_64 | Windows x86_64 | macOS arm64 |
 | --- | --- | ---: | ---: | ---: |
@@ -99,7 +99,7 @@ How to read these numbers:
 
 - Every run of the workflow publishes the full tables, including the runner's CPU, on the summary page of that run. It runs for each change to the package on `main` and for pull requests.
 - Runner hardware differs from run to run, and absolute times have moved by 20-40% between two runs of the same code. Compare packages within one run, not absolute times across runs.
-- The lead over `c-uuid-v7` on x86_64 is within that noise: `fastuuidv7.uuid7` was about 8% faster on Linux and 15% faster on Windows in this run, and about 19% slower on Linux in the run before it (commit `0782ebd`).
+- The lead over `c-uuid-v7` on x86_64 is within that noise: `fastuuidv7.uuid7` was about 8% faster on Linux and 15% faster on Windows in this run, and about 19% slower on Linux in another run of the same 0.1.9 wheel on the same day.
 - The standard library's `uuid.uuid7` needs Python 3.14 and is therefore missing from the CI table. A local run on macOS arm64 with Python 3.14.4 measured `1588.9 ns` per call.
 
 ## Notes
