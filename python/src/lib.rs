@@ -1,7 +1,7 @@
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyString, PyTuple};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyString, PyTuple};
 #[cfg(not(Py_GIL_DISABLED))]
 use pyo3::ffi;
 use std::cell::Cell;
@@ -21,7 +21,6 @@ static GLOBAL: MiMalloc = MiMalloc;
         frozen,
         freelist = 1024,
         immutable_type,
-        unsendable,
         skip_from_py_object
     )
 )]
@@ -31,12 +30,32 @@ static GLOBAL: MiMalloc = MiMalloc;
         module = "fastuuidv7",
         frozen,
         freelist = 1024,
-        unsendable,
         skip_from_py_object
     )
 )]
 struct UUID {
-    id: Cell<u128>,
+    id: IdCell,
+}
+
+struct IdCell(Cell<u128>);
+
+// SAFETY: the only write is the cache reuse in `uuid7_with_cache_id`, which
+// exists on GIL builds only and runs with the GIL held while the cache is the
+// sole owner; every read there also holds the GIL. Free-threaded builds never
+// write after construction. So a `UUID` may be shared across threads.
+unsafe impl Sync for IdCell {}
+
+impl IdCell {
+    #[inline]
+    fn get(&self) -> u128 {
+        self.0.get()
+    }
+
+    #[cfg(not(Py_GIL_DISABLED))]
+    #[inline]
+    fn set(&self, id: u128) {
+        self.0.set(id);
+    }
 }
 
 fn parse_uuid_text(text: &str) -> PyResult<u128> {
@@ -130,7 +149,9 @@ fn py_ascii_string_from_bytes<'py>(py: Python<'py>, bytes: &[u8]) -> Bound<'py, 
 impl UUID {
     #[inline]
     fn new(id: u128) -> Self {
-        Self { id: Cell::new(id) }
+        Self {
+            id: IdCell(Cell::new(id)),
+        }
     }
 }
 
@@ -214,6 +235,15 @@ fn reset_uuid_cache() {
     UUID_CACHE.with(|cache| {
         *cache.borrow_mut() = None;
     });
+}
+
+/// Re-seeds the calling thread's generator from the OS random source.
+///
+/// Registered as an `os.register_at_fork` child hook at import, so a forked
+/// worker does not replay the random bits of its parent.
+#[pyfunction]
+fn reseed() {
+    fast_uuid_v7::reseed();
 }
 
 #[pymethods]
@@ -460,6 +490,14 @@ fn fastuuidv7(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     m.add("uuid7_bytes", m.getattr("gen_id_bytes")?)?;
+
+    m.add_function(wrap_pyfunction!(reseed, m)?)?;
+    // `register_at_fork` is missing on platforms without fork (Windows).
+    if let Ok(register_at_fork) = m.py().import("os")?.getattr("register_at_fork") {
+        let kwargs = PyDict::new(m.py());
+        kwargs.set_item("after_in_child", m.getattr("reseed")?)?;
+        register_at_fork.call((), Some(&kwargs))?;
+    }
 
     Ok(())
 }

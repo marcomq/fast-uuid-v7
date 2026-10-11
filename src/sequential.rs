@@ -3,8 +3,8 @@
 //  Licensed under MIT License, see License file for more details
 //  git clone https://github.com/marcomq/fast-uuid-v7
 
+use rand::Rng;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
 
 use crate::{COUNTER_MAX, COUNTER_SEED_MASK, UuidString, clock, format_uuid, uuid_v7_from_parts};
 
@@ -71,7 +71,7 @@ impl SequentialGenerator {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            rng: SmallRng::from_rng(&mut rand::rng()),
+            rng: crate::os_seeded_rng(),
             clock: clock::Clock::new(),
             last_ms: 0,
             counter: 0,

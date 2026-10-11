@@ -59,6 +59,12 @@ mod sequential;
 
 pub use sequential::SequentialGenerator;
 
+/// Seeds from the OS instead of `rand::rng()`: `fork()` copies the thread RNG,
+/// so a parent and its children would otherwise derive identical seeds.
+fn os_seeded_rng() -> SmallRng {
+    SmallRng::try_from_rng(&mut rand::rngs::SysRng).expect("OS random source unavailable")
+}
+
 struct ThreadState {
     rng: SmallRng,
     last_ms: u64,
@@ -71,7 +77,7 @@ struct ThreadState {
 impl ThreadState {
     fn new() -> Self {
         Self {
-            rng: SmallRng::from_rng(&mut rand::rng()),
+            rng: os_seeded_rng(),
             last_ms: 0,
             last_nanos_within_ms: 0,
             last_sampled_nanos_within_ms: 0,
@@ -189,6 +195,20 @@ fn with_state<R>(f: impl FnOnce(&mut ThreadState) -> R) -> R {
         let state = unsafe { &mut *state_cell.get() };
         f(state)
     })
+}
+
+/// Re-seeds the calling thread's generator from the OS random source.
+///
+/// `fork()` copies the generator state, so a child process would otherwise
+/// replay the random bits of its parent and produce colliding ids. Call this
+/// in the child after forking; no other thread survives a fork, so only the
+/// calling thread needs it. Timestamp and counter state are kept, so
+/// per-thread ordering is unaffected.
+///
+/// A [`SequentialGenerator`] created before the fork is not covered: create a
+/// new instance in the child instead.
+pub fn reseed() {
+    with_state(|state| state.rng = os_seeded_rng());
 }
 
 #[inline]
@@ -792,6 +812,14 @@ mod tests {
             }
             last_id = id;
         }
+    }
+
+    #[test]
+    fn test_reseed_keeps_counter_ordering() {
+        let before = gen_id_with_count();
+        reseed();
+        let after = gen_id_with_count();
+        assert!(after > before);
     }
 
     #[test]
