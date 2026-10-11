@@ -3,10 +3,10 @@
 //  Licensed under MIT License, see License file for more details
 //  git clone https://github.com/marcomq/fast-uuid-v7
 
+use rand::Rng;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
 
-use crate::{clock, format_uuid, uuid_v7_from_parts, UuidString, COUNTER_MAX, COUNTER_SEED_MASK};
+use crate::{COUNTER_MAX, COUNTER_SEED_MASK, UuidString, clock, format_uuid, uuid_v7_from_parts};
 
 /// Generates strictly increasing UUID v7 values from its own, owned state.
 ///
@@ -41,10 +41,10 @@ use crate::{clock, format_uuid, uuid_v7_from_parts, UuidString, COUNTER_MAX, COU
 /// ```
 /// use fast_uuid_v7::SequentialGenerator;
 ///
-/// let mut gen = SequentialGenerator::new();
+/// let mut generator = SequentialGenerator::new();
 /// let mut previous = 0u128;
 /// for _row in 0..1000 {
-///     let id = gen.next_id();
+///     let id = generator.next_id();
 ///     assert!(id > previous);
 ///     previous = id;
 /// }
@@ -56,8 +56,8 @@ use crate::{clock, format_uuid, uuid_v7_from_parts, UuidString, COUNTER_MAX, COU
 /// use fast_uuid_v7::SequentialGenerator;
 ///
 /// let rows = ["first", "second", "third"];
-/// let mut gen = SequentialGenerator::new();
-/// let ided: Vec<(u128, &str)> = gen.by_ref().zip(rows).collect();
+/// let mut generator = SequentialGenerator::new();
+/// let ided: Vec<(u128, &str)> = generator.by_ref().zip(rows).collect();
 /// assert!(ided[0].0 < ided[1].0);
 /// ```
 pub struct SequentialGenerator {
@@ -71,7 +71,7 @@ impl SequentialGenerator {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            rng: SmallRng::from_rng(&mut rand::rng()),
+            rng: crate::os_seeded_rng(),
             clock: clock::Clock::new(),
             last_ms: 0,
             counter: 0,
@@ -170,10 +170,10 @@ mod tests {
 
     #[test]
     fn ids_are_strictly_increasing() {
-        let mut gen = SequentialGenerator::new();
+        let mut generator = SequentialGenerator::new();
         let mut previous = 0u128;
         for _ in 0..1_000_000 {
-            let id = gen.next_id();
+            let id = generator.next_id();
             assert!(id > previous);
             previous = id;
         }
@@ -181,8 +181,8 @@ mod tests {
 
     #[test]
     fn strings_sort_like_the_ids() {
-        let mut gen = SequentialGenerator::new();
-        let ids: Vec<_> = (0..10_000).map(|_| gen.next_id_str()).collect();
+        let mut generator = SequentialGenerator::new();
+        let ids: Vec<_> = (0..10_000).map(|_| generator.next_id_str()).collect();
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(ids, sorted);
@@ -190,31 +190,31 @@ mod tests {
 
     #[test]
     fn counter_exhaustion_advances_timestamp() {
-        let mut gen = SequentialGenerator::new();
-        let first = gen.next_id();
+        let mut generator = SequentialGenerator::new();
+        let first = generator.next_id();
         // Far-future timestamp so a clock refresh cannot advance it and mask
         // the rollover path we want to exercise.
-        gen.last_ms = 0xF000_0000_0000;
-        gen.counter = COUNTER_MAX;
-        let ms_before = gen.last_ms;
-        let second = gen.next_id();
-        assert_eq!(gen.last_ms, ms_before + 1);
-        assert!(gen.counter <= COUNTER_SEED_MASK);
+        generator.last_ms = 0xF000_0000_0000;
+        generator.counter = COUNTER_MAX;
+        let ms_before = generator.last_ms;
+        let second = generator.next_id();
+        assert_eq!(generator.last_ms, ms_before + 1);
+        assert!(generator.counter <= COUNTER_SEED_MASK);
         assert!(second > first);
     }
 
     #[test]
     fn counter_is_reseeded_on_a_new_millisecond() {
-        let mut gen = SequentialGenerator::new();
-        let first = gen.next_id();
-        let ms_before = gen.last_ms;
+        let mut generator = SequentialGenerator::new();
+        let first = generator.next_id();
+        let ms_before = generator.last_ms;
         // Push the counter beyond any value a reseed could produce, so the
         // assertion below can only pass if the new millisecond reseeded it.
-        gen.counter = COUNTER_SEED_MASK + 1000;
+        generator.counter = COUNTER_SEED_MASK + 1000;
         std::thread::sleep(std::time::Duration::from_millis(2));
-        let second = gen.next_id();
-        assert!(gen.last_ms > ms_before);
-        assert!(gen.counter <= COUNTER_SEED_MASK);
+        let second = generator.next_id();
+        assert!(generator.last_ms > ms_before);
+        assert!(generator.counter <= COUNTER_SEED_MASK);
         assert!(second > first);
     }
 
@@ -222,9 +222,9 @@ mod tests {
     fn instances_do_not_share_one_counter_sequence() {
         let counters: Vec<u32> = (0..8)
             .map(|_| {
-                let mut gen = SequentialGenerator::new();
-                let _ = gen.next_id();
-                gen.counter
+                let mut generator = SequentialGenerator::new();
+                let _ = generator.next_id();
+                generator.counter
             })
             .collect();
         assert!(counters.iter().all(|c| *c <= COUNTER_SEED_MASK));
@@ -234,14 +234,14 @@ mod tests {
 
     #[test]
     fn version_and_variant_survive_counter_rollover() {
-        let mut gen = SequentialGenerator::new();
+        let mut generator = SequentialGenerator::new();
         // Far-future timestamp so clock refreshes cannot advance it and mask
         // the rollover path; re-exhausting the counter forces it every round.
-        gen.last_ms = 0xF000_0000_0000;
+        generator.last_ms = 0xF000_0000_0000;
         let mut previous = 0u128;
         for _ in 0..1000 {
-            gen.counter = COUNTER_MAX;
-            let id = gen.next_id();
+            generator.counter = COUNTER_MAX;
+            let id = generator.next_id();
             assert_eq!((id >> 76) & 0xF, 7);
             assert_eq!((id >> 62) & 0x3, 0b10);
             assert!(id > previous);
@@ -251,32 +251,32 @@ mod tests {
 
     #[test]
     fn iterator_yields_the_same_increasing_sequence() {
-        let mut gen = SequentialGenerator::new();
-        let ids: Vec<u128> = gen.by_ref().take(10_000).collect();
+        let mut generator = SequentialGenerator::new();
+        let ids: Vec<u128> = generator.by_ref().take(10_000).collect();
         assert_eq!(ids.len(), 10_000);
         assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
-        assert!(gen.next_id() > ids[ids.len() - 1]);
+        assert!(generator.next_id() > ids[ids.len() - 1]);
     }
 
     #[test]
     fn next_id_string_matches_next_id_str() {
-        let mut gen = SequentialGenerator::new();
-        let owned = gen.next_id_string();
+        let mut generator = SequentialGenerator::new();
+        let owned = generator.next_id_string();
         assert_eq!(owned.len(), 36);
-        assert!(owned.as_str() < gen.next_id_str().as_str());
+        assert!(owned.as_str() < generator.next_id_str().as_str());
     }
 
     #[test]
     fn backwards_clock_does_not_break_ordering() {
-        let mut gen = SequentialGenerator::new();
-        let first = gen.next_id();
+        let mut generator = SequentialGenerator::new();
+        let first = generator.next_id();
         // Simulate a clock that jumped forward once and then back: every later
         // wall-clock sample is now in the past relative to `last_ms`.
-        gen.last_ms += 60_000;
-        let mut previous = gen.next_id();
+        generator.last_ms += 60_000;
+        let mut previous = generator.next_id();
         assert!(previous > first);
         for _ in 0..10_000 {
-            let id = gen.next_id();
+            let id = generator.next_id();
             assert!(id > previous);
             previous = id;
         }
@@ -301,8 +301,8 @@ mod tests {
 
     #[test]
     fn string_and_u128_orderings_agree() {
-        let mut gen = SequentialGenerator::new();
-        let ids: Vec<u128> = (0..10_000).map(|_| gen.next_id()).collect();
+        let mut generator = SequentialGenerator::new();
+        let ids: Vec<u128> = (0..10_000).map(|_| generator.next_id()).collect();
         for pair in ids.windows(2) {
             assert!(format_uuid(pair[0]).as_str() < format_uuid(pair[1]).as_str());
         }
@@ -310,9 +310,9 @@ mod tests {
 
     #[test]
     fn version_and_variant_are_preserved() {
-        let mut gen = SequentialGenerator::new();
+        let mut generator = SequentialGenerator::new();
         for _ in 0..1000 {
-            let id = gen.next_id();
+            let id = generator.next_id();
             assert_eq!((id >> 76) & 0xF, 7);
             assert_eq!((id >> 62) & 0x3, 0b10);
         }

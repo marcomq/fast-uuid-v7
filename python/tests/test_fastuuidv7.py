@@ -1,3 +1,4 @@
+import os
 import threading
 import unittest
 import uuid
@@ -161,6 +162,57 @@ class SequentialGeneratorTests(unittest.TestCase):
 
         self.assertEqual(ids, sorted(ids))
         self.assertEqual(len(set(ids)), len(ids))
+
+
+class CrossThreadAndForkTests(unittest.TestCase):
+    def test_uuid_object_is_usable_on_another_thread(self):
+        value = fastuuidv7.uuid7()
+        seen = []
+
+        thread = threading.Thread(target=lambda: seen.append((str(value), value.int)))
+        thread.start()
+        thread.join()
+
+        self.assertEqual(seen, [(str(value), value.int)])
+
+    def test_concurrent_threads_generate_unique_uuids(self):
+        chunks = []
+
+        def work():
+            chunks.append([fastuuidv7.uuid7().int for _ in range(5_000)])
+
+        threads = [threading.Thread(target=work) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        ids = [value for chunk in chunks for value in chunk]
+        self.assertEqual(len(ids), 20_000)
+        self.assertEqual(len(set(ids)), len(ids))
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires os.fork")
+    def test_forked_child_does_not_replay_parent_random_bits(self):
+        random_bits = (0xFFF << 64) | 0x3FFF_FFFF_FFFF_FFFF
+        fastuuidv7.gen_id()
+
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            ids = [fastuuidv7.gen_id() for _ in range(8)]
+            os.write(write_fd, ",".join(map(str, ids)).encode())
+            os._exit(0)
+
+        os.close(write_fd)
+        parent = [fastuuidv7.gen_id() for _ in range(8)]
+        with os.fdopen(read_fd) as pipe:
+            child = [int(raw) for raw in pipe.read().split(",")]
+        os.waitpid(pid, 0)
+
+        self.assertFalse(
+            {i & random_bits for i in parent} & {i & random_bits for i in child}
+        )
 
 
 if __name__ == "__main__":

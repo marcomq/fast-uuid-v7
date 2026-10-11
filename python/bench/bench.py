@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 
+import argparse
 import importlib
 import importlib.metadata
+import platform
 import timeit
 import uuid
 
 CALLS = 500_000
 REPEAT = 3
+# Runner hardware differs between runs, so the Markdown report also gives each
+# result relative to this callable from the same run.
+REFERENCE = "fastuuidv7.uuid7"
 
 PACKAGE_VERSIONS = [
     ("uuid6", "uuid6"),
@@ -100,7 +105,20 @@ def resolve_benchmarks():
             continue
 
         seen.add(name)
-        benchmarks.append((name, fn))
+        benchmarks.append((name, fn, None))
+
+    uuid7_callable = getattr(uuid, "uuid7", None)
+    if callable(uuid7_callable):
+        if "uuid.uuid7" not in seen:
+            benchmarks.append(("uuid.uuid7", uuid7_callable, None))
+    else:
+        skipped.append("uuid.uuid7")
+
+    # c-uuid-v7 has no string generator, so str() of its UUID is the counterpart
+    # of fastuuidv7.uuid7_str.
+    fn = getattr(optional_module("c_uuid_v7"), "uuid7", None)
+    if callable(fn):
+        benchmarks.append(("str(c_uuid_v7.uuid7())", "str(uuid7())", {"uuid7": fn}))
 
     local = optional_module("fastuuidv7")
     if local is None:
@@ -111,45 +129,89 @@ def resolve_benchmarks():
             name = f"fastuuidv7.{attribute_name}"
             if callable(fn) and name not in seen:
                 seen.add(name)
-                benchmarks.append((name, fn))
-
-    uuid7_callable = getattr(uuid, "uuid7", None)
-    if callable(uuid7_callable):
-        if "uuid.uuid7" not in seen:
-            benchmarks.append(("uuid.uuid7", uuid7_callable))
-    else:
-        skipped.append("uuid.uuid7")
+                benchmarks.append((name, fn, None))
 
     return benchmarks, skipped
 
 
-def benchmark(name, fn):
+def benchmark(name, stmt, namespace=None):
     # Take the fastest of REPEAT runs to reject scheduler/VM noise.
-    elapsed = min(timeit.repeat(fn, number=CALLS, repeat=REPEAT))
+    elapsed = min(timeit.repeat(stmt, number=CALLS, repeat=REPEAT, globals=namespace))
     ops_per_sec = CALLS / elapsed
     ns_per_call = elapsed * 1e9 / CALLS
     print(f"{name:24} {ops_per_sec:12.0f} ops/s  {ns_per_call:10.1f} ns/call")
+    return name, ops_per_sec, ns_per_call
 
 
-def print_package_versions():
-    print("Installed benchmark package versions:")
+def package_versions():
+    versions = []
     for label, dist_name in PACKAGE_VERSIONS:
         try:
             version = importlib.metadata.version(dist_name)
         except importlib.metadata.PackageNotFoundError:
             version = "not installed"
 
+        versions.append((label, version))
+
+    return versions
+
+
+def print_package_versions(versions):
+    print("Installed benchmark package versions:")
+    for label, version in versions:
         print(f"  {label:<12} {version}")
 
     print()
 
 
+def cpu_model():
+    # platform.processor() is just the architecture on Linux.
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as cpuinfo:
+            for line in cpuinfo:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+
+    return platform.processor() or platform.machine()
+
+
+def write_markdown(path, title, versions, results):
+    reference = next((ns for name, _, ns in results if name == REFERENCE), None)
+    lines = [
+        f"## {title}",
+        "",
+        f"- Platform: `{platform.platform()}`",
+        f"- CPU: `{cpu_model()}`",
+        f"- Python: `{platform.python_version()}`",
+        f"- Packages: {', '.join(f'`{label} {version}`' for label, version in versions)}",
+        f"- Fastest of {REPEAT} runs of {CALLS:,} single calls each.",
+        "",
+        f"| Callable | ops/s | ns/call | vs `{REFERENCE}` |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for name, ops_per_sec, ns_per_call in results:
+        relative = f"{ns_per_call / reference:.2f}x" if reference else "n/a"
+        lines.append(f"| `{name}` | {ops_per_sec:,.0f} | {ns_per_call:.1f} | {relative} |")
+
+    # Append, so several platforms can share one file (e.g. $GITHUB_STEP_SUMMARY).
+    with open(path, "a", encoding="utf-8") as output:
+        output.write("\n".join(lines) + "\n\n")
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--markdown", metavar="FILE", help="append the results as a Markdown table")
+    parser.add_argument("--title", default=f"{platform.system()} {platform.machine()}")
+    args = parser.parse_args()
+
     print(f"Single-call throughput over {CALLS:,} repeated calls")
     print("Includes Python/native boundary overhead when calling extension modules.")
     print()
 
-    print_package_versions()
+    versions = package_versions()
+    print_package_versions(versions)
     benchmarks, skipped = resolve_benchmarks()
     for name in skipped:
         print(f"Skipping {name}: not installed or no known UUIDv7 callable found")
@@ -157,8 +219,10 @@ def main():
     if skipped:
         print()
 
-    for name, fn in benchmarks:
-        benchmark(name, fn)
+    results = [benchmark(*entry) for entry in benchmarks]
+
+    if args.markdown:
+        write_markdown(args.markdown, args.title, versions, results)
 
 
 if __name__ == "__main__":

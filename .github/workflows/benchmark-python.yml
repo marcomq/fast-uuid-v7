@@ -59,7 +59,8 @@ jobs:
       - name: Install built package
         shell: bash
         run: |
-          pip install --find-links python/dist fastuuidv7
+          # --no-index: never fall back to the PyPI release of the same version.
+          pip install --no-index --find-links python/dist fastuuidv7
 
       - name: Install comparison packages
         shell: bash
@@ -112,7 +113,7 @@ jobs:
         shell: bash
         run: |
           echo "=== Running Benchmark ==="
-          python python/bench/bench.py
+          python python/bench/bench.py --markdown python/bench/results.md --title "${{ matrix.platform.name }}"
           echo ""
 
       - name: Run extended performance test
@@ -197,8 +198,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-${{ matrix.platform.name }}
-          path: |
-            python/bench/
+          path: python/bench/results.md
           retention-days: 30
 
   summary:
@@ -216,11 +216,8 @@ jobs:
         run: |
           echo "# Python Benchmark Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Benchmarks completed for:" >> $GITHUB_STEP_SUMMARY
-          echo "- Linux x86_64" >> $GITHUB_STEP_SUMMARY
-          echo "- Windows x86_64" >> $GITHUB_STEP_SUMMARY
-          echo "- macOS ARM64 (Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+          echo "Commit \`${{ github.event.pull_request.head.sha || github.sha }}\`. Runner hardware differs between runs, so compare the relative column rather than absolute times across runs." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "See individual job logs for detailed performance metrics." >> $GITHUB_STEP_SUMMARY
+          cat results/*/results.md >> $GITHUB_STEP_SUMMARY
 
 # Made with Bob

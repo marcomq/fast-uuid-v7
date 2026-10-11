@@ -59,6 +59,12 @@ mod sequential;
 
 pub use sequential::SequentialGenerator;
 
+/// Seeds from the OS instead of `rand::rng()`: `fork()` copies the thread RNG,
+/// so a parent and its children would otherwise derive identical seeds.
+fn os_seeded_rng() -> SmallRng {
+    SmallRng::try_from_rng(&mut rand::rngs::SysRng).expect("OS random source unavailable")
+}
+
 struct ThreadState {
     rng: SmallRng,
     last_ms: u64,
@@ -71,7 +77,7 @@ struct ThreadState {
 impl ThreadState {
     fn new() -> Self {
         Self {
-            rng: SmallRng::from_rng(&mut rand::rng()),
+            rng: os_seeded_rng(),
             last_ms: 0,
             last_nanos_within_ms: 0,
             last_sampled_nanos_within_ms: 0,
@@ -108,6 +114,22 @@ impl ThreadState {
             self.refresh_time();
         }
         self.last_ms
+    }
+
+    #[inline(always)]
+    fn next_random_id(&mut self) -> u128 {
+        let timestamp = self.get_time();
+
+        // We need 74 bits of randomness. SmallRng generates 64 bits per call.
+        let r1 = self.rng.next_u32();
+        let r2 = self.rng.next_u64();
+
+        // rand_a: 12 bits (from r1)
+        let rand_a = (r1 & 0x0FFF) as u16;
+        // rand_b: 62 bits (from r2)
+        let rand_b = r2 & 0x3FFF_FFFF_FFFF_FFFF;
+
+        uuid_v7_from_parts(timestamp, rand_a, rand_b)
     }
 
     #[inline(always)]
@@ -191,6 +213,21 @@ fn with_state<R>(f: impl FnOnce(&mut ThreadState) -> R) -> R {
     })
 }
 
+/// Re-seeds the calling thread's generator from the OS random source.
+///
+/// `fork()` copies the generator state, so a child process would otherwise
+/// replay the random bits of its parent and produce colliding ids. Call this
+/// in the child after forking; no other thread survives a fork, so only the
+/// calling thread needs it. Timestamp and counter state are kept, so
+/// per-thread ordering is unaffected.
+///
+/// A [`SequentialGenerator`] or [`RandomGenerator`] created before the fork is
+/// not covered: create a new instance in the child, or call
+/// [`RandomGenerator::reseed`].
+pub fn reseed() {
+    with_state(|state| state.rng = os_seeded_rng());
+}
+
 #[inline]
 fn compose_rand_a(random: u16, fraction: u16, bits: u8) -> u16 {
     debug_assert!(bits <= 12);
@@ -235,20 +272,44 @@ fn uuid_v7_from_parts(timestamp_ms: u64, rand_a: u16, rand_b: u64) -> u128 {
 /// fast-uuid-v7 is is not random enough for cryptography!
 #[inline]
 pub fn gen_id_u128() -> u128 {
-    with_state(|state| {
-        let timestamp = state.get_time();
+    with_state(|state| state.next_random_id())
+}
 
-        // We need 74 bits of randomness. SmallRng generates 64 bits per call.
-        let r1 = state.rng.next_u32();
-        let r2 = state.rng.next_u64();
+/// Owned-state counterpart of [`gen_id`]: the same ids, generated from this
+/// instance instead of the thread-local state.
+///
+/// Useful when the caller already serializes access (e.g. behind a lock) and
+/// wants to skip the thread-local lookup. This is not random enough for
+/// cryptography!
+pub struct RandomGenerator {
+    state: ThreadState,
+}
 
-        // rand_a: 12 bits (from r1)
-        let rand_a = (r1 & 0x0FFF) as u16;
-        // rand_b: 62 bits (from r2)
-        let rand_b = r2 & 0x3FFF_FFFF_FFFF_FFFF;
+impl RandomGenerator {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            state: ThreadState::new(),
+        }
+    }
 
-        uuid_v7_from_parts(timestamp, rand_a, rand_b)
-    })
+    /// Returns the next id, with the layout described at [`gen_id_u128`].
+    #[inline]
+    #[must_use]
+    pub fn next_id(&mut self) -> u128 {
+        self.state.next_random_id()
+    }
+
+    /// Re-seeds this generator from the OS random source, see [`reseed`].
+    pub fn reseed(&mut self) {
+        self.state.rng = os_seeded_rng();
+    }
+}
+
+impl Default for RandomGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Alias for `gen_id_u128`.
@@ -792,6 +853,28 @@ mod tests {
             }
             last_id = id;
         }
+    }
+
+    #[test]
+    fn test_random_generator_yields_unique_uuid_v7() {
+        let mut generator = RandomGenerator::new();
+        let first = generator.next_id();
+        generator.reseed();
+        let second = generator.next_id();
+
+        assert_ne!(first, second);
+        assert_eq!(
+            uuid::Uuid::from_u128(first).get_version(),
+            Some(uuid::Version::SortRand)
+        );
+    }
+
+    #[test]
+    fn test_reseed_keeps_counter_ordering() {
+        let before = gen_id_with_count();
+        reseed();
+        let after = gen_id_with_count();
+        assert!(after > before);
     }
 
     #[test]

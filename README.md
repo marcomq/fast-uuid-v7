@@ -23,6 +23,8 @@ I found out about the `fast-rng` feature flag of `uuid` after creating this crat
 
 ## Comparison to `uuid` crate
 
+The numbers below were measured locally on one machine and vary by hardware; see [Benchmarking](#benchmarking) to measure them on yours.
+
 Compared to the standard `uuid` crate (~856ns per ID with its default secure RNG on this machine):
 *   **`fast-uuid-v7` can be around ~178x faster** (4.8ns vs 856ns).
 *   When using feature `fast-rng` on the original `uuid` crate, `fast-uuid-v7` is still about

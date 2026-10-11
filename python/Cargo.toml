@@ -1,7 +1,8 @@
 [package]
 name = "fastuuidv7"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
 description = "Python bindings for fast-uuid-v7."
 license.workspace = true
 
