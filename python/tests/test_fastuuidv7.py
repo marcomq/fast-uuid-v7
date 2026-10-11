@@ -175,6 +175,22 @@ class CrossThreadAndForkTests(unittest.TestCase):
 
         self.assertEqual(seen, [(str(value), value.int)])
 
+    def test_concurrent_threads_generate_unique_uuids(self):
+        chunks = []
+
+        def work():
+            chunks.append([fastuuidv7.uuid7().int for _ in range(5_000)])
+
+        threads = [threading.Thread(target=work) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        ids = [value for chunk in chunks for value in chunk]
+        self.assertEqual(len(ids), 20_000)
+        self.assertEqual(len(set(ids)), len(ids))
+
     @unittest.skipUnless(hasattr(os, "fork"), "requires os.fork")
     def test_forked_child_does_not_replay_parent_random_bits(self):
         random_bits = (0xFFF << 64) | 0x3FFF_FFFF_FFFF_FFFF

@@ -117,6 +117,22 @@ impl ThreadState {
     }
 
     #[inline(always)]
+    fn next_random_id(&mut self) -> u128 {
+        let timestamp = self.get_time();
+
+        // We need 74 bits of randomness. SmallRng generates 64 bits per call.
+        let r1 = self.rng.next_u32();
+        let r2 = self.rng.next_u64();
+
+        // rand_a: 12 bits (from r1)
+        let rand_a = (r1 & 0x0FFF) as u16;
+        // rand_b: 62 bits (from r2)
+        let rand_b = r2 & 0x3FFF_FFFF_FFFF_FFFF;
+
+        uuid_v7_from_parts(timestamp, rand_a, rand_b)
+    }
+
+    #[inline(always)]
     fn get_time_and_counter(&mut self) -> (u64, u32) {
         if (self.last_ms == 0 || self.clock.should_refresh()) && self.refresh_time() {
             (self.last_ms, self.counter)
@@ -205,8 +221,9 @@ fn with_state<R>(f: impl FnOnce(&mut ThreadState) -> R) -> R {
 /// calling thread needs it. Timestamp and counter state are kept, so
 /// per-thread ordering is unaffected.
 ///
-/// A [`SequentialGenerator`] created before the fork is not covered: create a
-/// new instance in the child instead.
+/// A [`SequentialGenerator`] or [`RandomGenerator`] created before the fork is
+/// not covered: create a new instance in the child, or call
+/// [`RandomGenerator::reseed`].
 pub fn reseed() {
     with_state(|state| state.rng = os_seeded_rng());
 }
@@ -255,20 +272,44 @@ fn uuid_v7_from_parts(timestamp_ms: u64, rand_a: u16, rand_b: u64) -> u128 {
 /// fast-uuid-v7 is is not random enough for cryptography!
 #[inline]
 pub fn gen_id_u128() -> u128 {
-    with_state(|state| {
-        let timestamp = state.get_time();
+    with_state(|state| state.next_random_id())
+}
 
-        // We need 74 bits of randomness. SmallRng generates 64 bits per call.
-        let r1 = state.rng.next_u32();
-        let r2 = state.rng.next_u64();
+/// Owned-state counterpart of [`gen_id`]: the same ids, generated from this
+/// instance instead of the thread-local state.
+///
+/// Useful when the caller already serializes access (e.g. behind a lock) and
+/// wants to skip the thread-local lookup. This is not random enough for
+/// cryptography!
+pub struct RandomGenerator {
+    state: ThreadState,
+}
 
-        // rand_a: 12 bits (from r1)
-        let rand_a = (r1 & 0x0FFF) as u16;
-        // rand_b: 62 bits (from r2)
-        let rand_b = r2 & 0x3FFF_FFFF_FFFF_FFFF;
+impl RandomGenerator {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            state: ThreadState::new(),
+        }
+    }
 
-        uuid_v7_from_parts(timestamp, rand_a, rand_b)
-    })
+    /// Returns the next id, with the layout described at [`gen_id_u128`].
+    #[inline]
+    #[must_use]
+    pub fn next_id(&mut self) -> u128 {
+        self.state.next_random_id()
+    }
+
+    /// Re-seeds this generator from the OS random source, see [`reseed`].
+    pub fn reseed(&mut self) {
+        self.state.rng = os_seeded_rng();
+    }
+}
+
+impl Default for RandomGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Alias for `gen_id_u128`.
@@ -812,6 +853,20 @@ mod tests {
             }
             last_id = id;
         }
+    }
+
+    #[test]
+    fn test_random_generator_yields_unique_uuid_v7() {
+        let mut generator = RandomGenerator::new();
+        let first = generator.next_id();
+        generator.reseed();
+        let second = generator.next_id();
+
+        assert_ne!(first, second);
+        assert_eq!(
+            uuid::Uuid::from_u128(first).get_version(),
+            Some(uuid::Version::SortRand)
+        );
     }
 
     #[test]
