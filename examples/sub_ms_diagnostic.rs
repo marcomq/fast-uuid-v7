@@ -1,4 +1,4 @@
-use fast_uuid_v7::{gen_id_with_sub_ms_12, gen_id_with_sub_ms_4, gen_id_with_sub_ms_8};
+use fast_uuid_v7::{gen_id_with_sub_ms_4, gen_id_with_sub_ms_8, gen_id_with_sub_ms_12};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_SAMPLES: usize = 20_000;

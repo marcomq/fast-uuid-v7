@@ -151,11 +151,15 @@ fn read_counter() -> u64 {
 }
 
 #[cfg(target_arch = "x86_64")]
+// The cpuid intrinsics are `unsafe fn` on older toolchains and safe on newer ones.
+#[allow(unused_unsafe)]
 fn counter_ticks_per_ms() -> u64 {
     // Prefer the CPU's declared base frequency (CPUID leaf 0x16): exact and cheap.
-    let max_leaf = std::arch::x86_64::__get_cpuid_max(0).0;
+    // SAFETY: CPUID is available on every x86_64 CPU.
+    let max_leaf = unsafe { std::arch::x86_64::__get_cpuid_max(0) }.0;
     if max_leaf >= 0x16 {
-        let res = std::arch::x86_64::__cpuid(0x16);
+        // SAFETY: as above; leaf 0x16 is within the reported maximum.
+        let res = unsafe { std::arch::x86_64::__cpuid(0x16) };
         if res.eax > 0 {
             return (res.eax as u64) * 1000;
         }
