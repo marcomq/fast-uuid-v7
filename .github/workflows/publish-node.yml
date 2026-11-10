@@ -164,9 +164,6 @@ jobs:
       - name: Sync version from Cargo workspace
         run: npm run sync-version
 
-      - name: Install Node dependencies
-        run: npm ci
-
       - name: Download loader into package root
         uses: actions/download-artifact@v4
         with:
@@ -179,11 +176,13 @@ jobs:
           pattern: bindings-*
           path: node/artifacts
 
+      # No `npm ci` here: npm 11 rejects the lock file while the platform
+      # packages it lists are not resolvable yet, and only the CLI is needed.
       - name: Create per-platform npm dirs
-        run: npx napi create-npm-dirs
+        run: npx -y -p @napi-rs/cli@3.10.12 napi create-npm-dirs
 
       - name: Distribute addons into npm dirs
-        run: npx napi artifacts -d artifacts
+        run: npx -y -p @napi-rs/cli@3.10.12 napi artifacts -d artifacts
 
       # The generated per-platform README is a tiny placeholder; give each
       # package a real README and the license.
