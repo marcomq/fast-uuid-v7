@@ -44,7 +44,7 @@ const changed = [
       const entry = lock.packages[`node_modules/${name}`];
       if (!entry) continue;
       entry.version = version;
-      entry.resolved = `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`;
+      entry.resolved = `https://registry.npmjs.org/${name}/-/${name.split("/").pop()}-${version}.tgz`;
       delete entry.integrity;
     }
   }) && "package-lock.json",

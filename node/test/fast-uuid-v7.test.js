@@ -106,7 +106,15 @@ test("SequentialGenerator is strictly increasing in every form", () => {
   }
 });
 
-test("genIdBuffer stays unique across pool refills", () => {
+test("genIdBuffer timestamp is taken at call time", async () => {
+  lib.genIdBuffer();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const before = Date.now();
+  const ms = timestampMs(BigInt(`0x${lib.genIdBuffer().toString("hex")}`));
+  assert.ok(ms >= before - 2, `${ms} older than ${before}`);
+});
+
+test("genIdBuffer ids are unique", () => {
   const ids = new Set();
   for (let i = 0; i < 2_000; i++) {
     const buf = lib.genIdBuffer();

@@ -31,7 +31,7 @@ fillIds(batch);
 |-------------------------------------------|----------|----------------------------------------------------------|
 | `genIdStr()` / `uuid7()`                  | `string` | Canonical `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`         |
 | `genIdHex()` / `uuid7Hex()`               | `string` | 32 hex chars without dashes                              |
-| `genIdBuffer()` / `uuid7Buffer()`         | `Buffer` | 16 bytes; a view into a shared pool, like `Buffer.allocUnsafe` |
+| `genIdBuffer()` / `uuid7Buffer()`         | `Buffer` | 16 bytes, big-endian; for many ids `fillIds` is faster   |
 | `genId()`                                 | `bigint` | 74 random bits                                           |
 | `fillIds(target)`                         | `number` | Fills `target` with 16-byte ids, returns the count       |
 | `genIdWithCount()` / `genIdWithCountStr()`| `bigint` / `string` | Monotonic per thread (18-bit counter + 56 random bits) |
@@ -69,7 +69,7 @@ Measured on an Apple M1, nanoseconds per id:
 | Function                         | Node 24 | Deno 2.9 | Bun 1.4 |
 |----------------------------------|--------:|---------:|--------:|
 | `genIdStr`                       |      45 |       48 |      89 |
-| `genIdBuffer`                    |      66 |       56 |      49 |
+| `genIdBuffer`                    |      99 |      111 |     184 |
 | `genId` (bigint)                 |      71 |       72 |      59 |
 | `fillIds` (batch of 1024)        |     7.4 |      7.6 |     7.5 |
 | `SequentialGenerator.nextIdStr`  |      75 |       71 |     122 |

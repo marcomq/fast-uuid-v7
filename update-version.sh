@@ -12,6 +12,11 @@ fi
 
 NEW_VERSION="$1"
 
+if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "Invalid version: '$NEW_VERSION' (expected e.g. 0.1.5)"
+    exit 1
+fi
+
 echo "Updating version to $NEW_VERSION..."
 
 # Update root Cargo.toml workspace version

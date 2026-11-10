@@ -4,11 +4,7 @@ export declare function genId(): bigint;
 export declare function genIdStr(): string;
 /** UUID v7 as 32 lowercase hex chars without dashes. */
 export declare function genIdHex(): string;
-/**
- * UUID v7 as 16-byte big-endian Buffer. Like small `Buffer.allocUnsafe`
- * buffers, it is a view into a shared pool; copy it before transferring
- * its `.buffer`.
- */
+/** UUID v7 as 16-byte big-endian Buffer. */
 export declare function genIdBuffer(): Buffer;
 /**
  * Fills `target` with as many 16-byte big-endian UUIDs as fit and returns

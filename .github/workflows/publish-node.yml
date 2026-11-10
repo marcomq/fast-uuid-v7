@@ -1,14 +1,12 @@
 name: Publish Node Package
 
 # Publishes the napi-rs addon in the standard layout: a thin root package
-# `fast-uuid-v7` plus one binary package per platform
-# (`fast-uuid-v7-darwin-arm64`, `fast-uuid-v7-linux-x64-gnu`, ...). The root lists
+# `fast-uuid-v7` plus one scoped binary package per platform
+# (`@marcomq/fast-uuid-v7-darwin-arm64`, ...; unscoped names trip npm spam detection). The root lists
 # the platform packages as optionalDependencies, so each consumer downloads only
 # its own binary; the napi loader (native.js) requires the matching one.
 #
-# Auth: OIDC trusted publishing, see node/NPM_SETUP.md. npm can only trust a
-# publisher for packages that already exist, so the very first release runs once
-# via workflow_dispatch with `bootstrap_with_token`, using the NPM_TOKEN secret.
+# Auth: OIDC trusted publishing only, no token; see node/NPM_SETUP.md.
 
 on:
   release:
@@ -20,10 +18,6 @@ on:
         description: "Run `npm publish --dry-run` instead of publishing"
         type: boolean
         default: true
-      bootstrap_with_token:
-        description: "Authenticate with the NPM_TOKEN secret instead of OIDC (first release only)"
-        type: boolean
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -209,8 +203,6 @@ jobs:
         env:
           NPM_CONFIG_PROVENANCE: "true"
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
-          # Empty unless bootstrapping; an unset token lets npm fall back to OIDC.
-          NODE_AUTH_TOKEN: ${{ inputs.bootstrap_with_token && secrets.NPM_TOKEN || '' }}
         run: |
           set -e
           publish() {

@@ -3,22 +3,11 @@
 const native = require("./native.js");
 
 const UUID_LEN = 16;
-const POOL_SIZE = UUID_LEN * 256;
 
-// Returned buffers are views into a pre-filled pool that is never written
-// again, like the small buffers of Node's own `Buffer.allocUnsafe`.
-let pool = Buffer.alloc(0);
-let poolOffset = 0;
-
-/** UUID v7 as 16-byte big-endian Buffer, a view into a shared pool. */
+/** UUID v7 as 16-byte big-endian Buffer. */
 function genIdBuffer() {
-  if (poolOffset === pool.length) {
-    pool = Buffer.allocUnsafeSlow(POOL_SIZE);
-    native.fillIds(pool);
-    poolOffset = 0;
-  }
-  const id = pool.subarray(poolOffset, poolOffset + UUID_LEN);
-  poolOffset += UUID_LEN;
+  const id = Buffer.allocUnsafe(UUID_LEN);
+  native.fillIds(id);
   return id;
 }
 
