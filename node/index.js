@@ -10,6 +10,7 @@ const POOL_SIZE = UUID_LEN * 256;
 let pool = Buffer.alloc(0);
 let poolOffset = 0;
 
+/** UUID v7 as 16-byte big-endian Buffer, a view into a shared pool. */
 function genIdBuffer() {
   if (poolOffset === pool.length) {
     pool = Buffer.allocUnsafeSlow(POOL_SIZE);
@@ -21,27 +22,33 @@ function genIdBuffer() {
   return id;
 }
 
+/** Strictly increasing UUID v7 ids, guaranteed per instance. */
 class SequentialGenerator {
   #handle = native.sequentialCreate();
 
+  /** Next id as BigInt. */
   nextId() {
     return native.sequentialNextId(this.#handle);
   }
 
+  /** Next id as canonical string. */
   nextIdStr() {
     return native.sequentialNextIdStr(this.#handle);
   }
 
+  /** Next id as 16-byte big-endian Buffer. */
   nextIdBuffer() {
     const id = Buffer.allocUnsafe(UUID_LEN);
     native.sequentialFillIds(this.#handle, id);
     return id;
   }
 
+  /** Fills `target` with consecutive 16-byte ids and returns their count. */
   fillIds(target) {
     return native.sequentialFillIds(this.#handle, target);
   }
 
+  /** Infinite iterator of BigInt ids. */
   *[Symbol.iterator]() {
     for (;;) yield this.nextId();
   }

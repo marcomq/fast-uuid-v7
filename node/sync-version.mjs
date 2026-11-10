@@ -16,10 +16,11 @@ if (!version) throw new Error("Could not read [workspace.package] version from C
 
 function sync(file, update) {
   const path = resolve(here, file);
-  const before = readFileSync(path, "utf8").replaceAll("\r\n", "\n");
+  const before = readFileSync(path, "utf8");
+  const eol = before.includes("\r\n") ? "\r\n" : "\n";
   const json = JSON.parse(before);
   update(json);
-  const after = `${JSON.stringify(json, null, 2)}\n`;
+  const after = `${JSON.stringify(json, null, 2)}\n`.replaceAll("\n", eol);
   if (before === after) return false;
   if (!checkOnly) writeFileSync(path, after);
   return true;

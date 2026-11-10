@@ -144,21 +144,25 @@ pub fn format_uuid(id: Either<BigInt, BufferSlice>) -> Result<AsciiStr<36>> {
 // class, whose methods pay for unwrapping `this` on every call.
 type Sequential = External<fast_uuid_v7::SequentialGenerator>;
 
+/// Creates the native state behind a JS `SequentialGenerator`.
 #[napi]
 pub fn sequential_create() -> Sequential {
     External::new(fast_uuid_v7::SequentialGenerator::new())
 }
 
+/// Next strictly increasing id of `generator` as BigInt.
 #[napi]
 pub fn sequential_next_id(generator: &mut Sequential) -> u128 {
     generator.next_id()
 }
 
+/// Next strictly increasing id of `generator` as canonical string.
 #[napi(ts_return_type = "string")]
 pub fn sequential_next_id_str(generator: &mut Sequential) -> AsciiStr<36> {
     uuid_str(generator.next_id())
 }
 
+/// Fills `target` with consecutive ids of `generator`, see [`fill_ids`].
 #[napi]
 pub fn sequential_fill_ids(generator: &mut Sequential, mut target: BufferSlice) -> u32 {
     fill(&mut target, || generator.next_id())
