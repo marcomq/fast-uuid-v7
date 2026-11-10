@@ -1,0 +1,16 @@
+node_modules/
+
+# napi-rs native build artifacts
+*.node
+native.js
+native.d.ts
+
+# generated per-platform npm package dirs + downloaded CI artifacts
+/npm/
+/artifacts/
+
+# copied from the repo root at publish time
+/LICENSE
+
+npm-debug.log*
+*.tgz

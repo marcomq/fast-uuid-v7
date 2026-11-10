@@ -1,5 +1,5 @@
 [workspace]
-members = ["python"]
+members = ["python", "node"]
 
 [workspace.package]
 version = "0.1.10"

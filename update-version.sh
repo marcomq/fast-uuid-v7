@@ -21,6 +21,9 @@ echo "✓ Updated Cargo.toml"
 echo "✓ python/Cargo.toml inherits version from workspace"
 echo "✓ python/pyproject.toml reads version dynamically from Cargo.toml"
 
+node node/sync-version.mjs
+echo "✓ node/package.json and package-lock.json synced"
+
 echo ""
 echo "Version update complete! Now you only need to:"
 echo "1. Update version in root Cargo.toml (line with 'version = \"...\")'"
