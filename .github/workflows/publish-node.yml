@@ -1,0 +1,223 @@
+name: Publish Node Package
+
+# Publishes the napi-rs addon in the standard layout: a thin root package
+# `fast-uuid-v7` plus one scoped binary package per platform
+# (`@marcomq/fast-uuid-v7-darwin-arm64`, ...; unscoped names trip npm spam detection). The root lists
+# the platform packages as optionalDependencies, so each consumer downloads only
+# its own binary; the napi loader (native.js) requires the matching one.
+#
+# Auth: OIDC trusted publishing only, no token; see node/NPM_SETUP.md.
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run `npm publish --dry-run` instead of publishing"
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    # Debian 11 => glibc 2.31 baseline (runs on RHEL 9, Debian 11+, Ubuntu 20.04+).
+    container:
+      image: node:20-bullseye
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Sync version from Cargo workspace
+        run: npm run sync-version
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build native addon
+        run: >-
+          npx napi build --platform --release --strip
+          --target ${{ matrix.target }}
+          --js native.js --dts native.d.ts
+
+      - name: Smoke test
+        run: npm test
+
+      - name: Upload addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: node/*.node
+          if-no-files-found: error
+
+      # The root package ships the generated loader; upload it once.
+      - name: Upload loader
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: loader
+          path: |
+            node/native.js
+            node/native.d.ts
+          if-no-files-found: error
+
+  build-native:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Sync version from Cargo workspace
+        run: npm run sync-version
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build native addon
+        run: >-
+          npx napi build --platform --release --strip
+          --target ${{ matrix.target }}
+          --js native.js --dts native.d.ts
+
+      - name: Smoke test
+        run: npm test
+
+      - name: Upload addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: node/*.node
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: [build-linux, build-native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing + provenance
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing (OIDC) requires npm >= 11.5.1.
+      - name: Update npm
+        run: npm install -g npm@11.5.1
+
+      - name: Sync version from Cargo workspace
+        run: npm run sync-version
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Download loader into package root
+        uses: actions/download-artifact@v4
+        with:
+          name: loader
+          path: node
+
+      - name: Download platform addons
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-*
+          path: node/artifacts
+
+      - name: Create per-platform npm dirs
+        run: npx napi create-npm-dirs
+
+      - name: Distribute addons into npm dirs
+        run: npx napi artifacts -d artifacts
+
+      # The generated per-platform README is a tiny placeholder; give each
+      # package a real README and the license.
+      - name: Add README and license to packages
+        run: |
+          set -e
+          cp ../LICENSE LICENSE
+          for dir in npm/*/; do
+            name=$(node -p "require('./$dir/package.json').name")
+            printf '# %s\n\nPrebuilt native binary for [`fast-uuid-v7`](https://www.npmjs.com/package/fast-uuid-v7).\nIt is selected automatically via optionalDependencies; install `fast-uuid-v7`, not this package.\n' "$name" > "$dir/README.md"
+            cp LICENSE "$dir/"
+            node -e "const p='./$dir/package.json',j=require(p);j.description='Prebuilt '+j.name+' binary for fast-uuid-v7';j.files=[...new Set([...(j.files||[]),'LICENSE'])];require('fs').writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
+          done
+          ls -R npm
+
+      - name: Publish platform packages and root
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          set -e
+          publish() {
+            local dir="$1" name ver
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            # A re-run after a partial publish must not fail on published dirs.
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "Skipping $name@$ver (already published)"
+              return 0
+            fi
+            echo "Publishing $name@$ver"
+            npm publish "$dir" --access public $DRY_RUN
+          }
+          for dir in npm/*/; do
+            publish "$dir"
+          done
+          publish .

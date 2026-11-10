@@ -1,0 +1,22 @@
+[package]
+name = "fast-uuid-v7-node"
+version.workspace = true
+edition.workspace = true
+# napi 3 needs a newer toolchain than the core crate.
+rust-version = "1.88"
+description = "Node.js bindings for fast-uuid-v7."
+license.workspace = true
+publish = false
+
+[lib]
+name = "fast_uuid_v7_node"
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+fast-uuid-v7 = { path = ".." }
+napi = { version = "3", default-features = false, features = ["napi6"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"

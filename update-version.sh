@@ -12,6 +12,11 @@ fi
 
 NEW_VERSION="$1"
 
+if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "Invalid version: '$NEW_VERSION' (expected e.g. 0.1.5)"
+    exit 1
+fi
+
 echo "Updating version to $NEW_VERSION..."
 
 # Update root Cargo.toml workspace version
@@ -20,6 +25,9 @@ sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml && rm Ca
 echo "✓ Updated Cargo.toml"
 echo "✓ python/Cargo.toml inherits version from workspace"
 echo "✓ python/pyproject.toml reads version dynamically from Cargo.toml"
+
+node node/sync-version.mjs
+echo "✓ node/package.json and package-lock.json synced"
 
 echo ""
 echo "Version update complete! Now you only need to:"
