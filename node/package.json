@@ -41,7 +41,7 @@
   "scripts": {
     "build": "napi build --platform --release --strip --js native.js --dts native.d.ts",
     "build:debug": "napi build --platform --js native.js --dts native.d.ts",
-    "test": "node --test test/*.test.js",
+    "test": "node --test",
     "bench": "node bench/bench.mjs",
     "sync-version": "node sync-version.mjs",
     "create-npm-dirs": "napi create-npm-dirs",
